@@ -13,7 +13,6 @@ app.use('*', logger())
 app.get('/api', api)
 app.get('/test', handler)
 
-// 这里是您的路由处理函数
 app.get('/', (c) => {
     const currentTime = new Date().toLocaleString('zh-CN', {
         year: 'numeric',
@@ -29,32 +28,23 @@ app.get('/', (c) => {
     const runtime = get_runtime()
     const baseUrl = get_url(c)
     
-    // 修复API地址拼接逻辑
     const getApiUrl = () => {
-        // 确保协议是https（如果从X-Forwarded-Proto获取）
-        const protocol = c.req.header('X-Forwarded-Proto') || 'https'
+        const protocol = c.req.header('X-Forwarded-Proto') || 'https' 
+        const host = c.req.header('Host') || new URL(c.req.url).host 
         
-        // 获取主机名
-        const host = c.req.header('Host') || new URL(c.req.url).host
+        let base = `${protocol}://${host}`  
         
-        // 构建基础URL
-        let base = `${protocol}://${host}`
-        
-        // 检查当前是否在/meting路径下
-        const currentPath = new URL(c.req.url).pathname
+        const currentPath = new URL(c.req.url).pathname 
         
         if (currentPath.startsWith('/meting')) {
-            // 如果已经在/meting路径下，API地址就是 /api
             return `${base}/api`
         } else {
-            // 如果不在/meting路径下，API地址是 /meting/api
             return `${base}/meting/api`
         }
     }
     
     const apiUrl = getApiUrl()
     
-    // 修复测试页面链接
     const getTestUrl = () => {
         const protocol = c.req.header('X-Forwarded-Proto') || 'https'
         const host = c.req.header('Host') || new URL(c.req.url).host
@@ -70,7 +60,6 @@ app.get('/', (c) => {
     
     const testUrl = getTestUrl()
     
-    // 修复基础URL（用于页面中的其他链接）
     const getCorrectBaseUrl = () => {
         const protocol = c.req.header('X-Forwarded-Proto') || 'https'
         const host = c.req.header('Host') || new URL(c.req.url).host
