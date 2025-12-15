@@ -1,8 +1,13 @@
 # 初叶🍂Meting API
 依据xizeyoupan作者修改的MetingAPI，我不是原作者，我只是拿他的修改！！！关于UI问题找我，不要找原作者！！！！！
-Vercel不确定是否支持这个版，不支持Docker安装
+不支持Docker安装
 
-此处为宝塔面板安装
+Vercel:
+1.先Fock仓库到自己Github账户
+2.登录Vercel并选择自己刚刚Fock的本仓库
+3.直接下一步即可安装成功，要在国内访问请绑定自己的域名
+
+宝塔面板:
 端口：2500
 环境：node v18.20.8及以上（我的测试）
 包管理器：npm
