@@ -5,8 +5,8 @@
 不支持Docker安装
 
 Vercel:
-1.先Fock仓库到自己Github账户
-2.登录Vercel并选择自己刚刚Fock的本仓库
+1.先Fork仓库到自己Github账户
+2.登录Vercel并选择自己刚刚Fork的本仓库
 3.直接下一步即可安装成功，要在国内访问请绑定自己的域名
 
 宝塔面板:
