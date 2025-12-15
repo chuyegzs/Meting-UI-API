@@ -5,13 +5,127 @@ import { logger } from 'hono/logger'
 import { cors } from 'hono/cors'
 import config from './src/config.js'
 import { get_runtime, get_url } from './src/util.js'
+import fs from 'fs/promises'
+import { existsSync } from 'fs'
+import path from 'path'
 
 const app = new Hono()
+
+const STATS_FILE = './stats.json'
+
+let apiStats = {
+    totalCalls: 0,
+    dailyCalls: {},
+    hourlyCalls: {},
+    lastUpdated: new Date().toISOString()
+};
+
+const loadStats = async () => {
+    try {
+        if (existsSync(STATS_FILE)) {
+            const data = await fs.readFile(STATS_FILE, 'utf8')
+            const savedStats = JSON.parse(data)
+            
+            apiStats.totalCalls = savedStats.totalCalls || 0
+            apiStats.dailyCalls = savedStats.dailyCalls || {}
+            apiStats.hourlyCalls = savedStats.hourlyCalls || {}
+            apiStats.lastUpdated = savedStats.lastUpdated || new Date().toISOString()
+            
+            console.log('✅ 统计数据加载成功')
+        }
+    } catch (error) {
+        console.log('📝 创建新的统计文件')
+        await saveStats()
+    }
+}
+
+const saveStats = async () => {
+    try {
+        apiStats.lastUpdated = new Date().toISOString()
+        await fs.writeFile(STATS_FILE, JSON.stringify(apiStats, null, 2), 'utf8')
+    } catch (error) {
+        console.error('❌ 保存统计数据失败:', error)
+    }
+}
+
+const updateStats = async () => {
+    const now = new Date();
+    const today = now.toISOString().split('T')[0]; // YYYY-MM-DD
+    const hour = now.getHours();
+    
+    apiStats.totalCalls++;
+    apiStats.dailyCalls[today] = (apiStats.dailyCalls[today] || 0) + 1;
+    const hourKey = `${today}-${hour}`;
+    apiStats.hourlyCalls[hourKey] = (apiStats.hourlyCalls[hourKey] || 0) + 1;
+    
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
+
+    Object.keys(apiStats.dailyCalls).forEach(date => {
+        if (date < thirtyDaysAgoStr) {
+            delete apiStats.dailyCalls[date];
+        }
+    });
+    
+    Object.keys(apiStats.hourlyCalls).forEach(key => {
+        const date = key.split('-')[0];
+        if (date < thirtyDaysAgoStr) {
+            delete apiStats.hourlyCalls[key];
+        }
+    });
+    
+    await saveStats();
+    
+    return apiStats;
+};
+
+const getTodayCalls = () => {
+    const today = new Date().toISOString().split('T')[0];
+    return apiStats.dailyCalls[today] || 0;
+};
+
+loadStats();
+
+app.use('/api', async (c, next) => {
+    await next();
+    if (c.res.status === 200) {
+        await updateStats();
+    }
+});
 
 app.use('*', cors())
 app.use('*', logger())
 app.get('/api', api)
 app.get('/test', handler)
+
+app.get('/stats', (c) => {
+    const today = new Date().toISOString().split('T')[0];
+    const todayCalls = apiStats.dailyCalls[today] || 0;
+    
+    return c.json({
+        success: true,
+        data: {
+            totalCalls: apiStats.totalCalls,
+            todayCalls: todayCalls,
+            dailyStats: apiStats.dailyCalls,
+            hourlyStats: apiStats.hourlyCalls,
+            lastUpdated: apiStats.lastUpdated,
+            timestamp: new Date().toISOString()
+        }
+    });
+});
+
+app.post('/stats/reset', async (c) => {
+    apiStats = {
+        totalCalls: 0,
+        dailyCalls: {},
+        hourlyCalls: {},
+        lastUpdated: new Date().toISOString()
+    };
+    await saveStats();
+    return c.json({ success: true, message: '统计数据已重置' });
+});
 
 app.get('/', (c) => {
     const currentTime = new Date().toLocaleString('zh-CN', {
@@ -29,12 +143,10 @@ app.get('/', (c) => {
     const baseUrl = get_url(c)
     
     const getApiUrl = () => {
-        const protocol = c.req.header('X-Forwarded-Proto') || 'https' 
-        const host = c.req.header('Host') || new URL(c.req.url).host 
-        
-        let base = `${protocol}://${host}`  
-        
-        const currentPath = new URL(c.req.url).pathname 
+        const protocol = c.req.header('X-Forwarded-Proto') || 'https'
+        const host = c.req.header('Host') || new URL(c.req.url).host
+        let base = `${protocol}://${host}`
+        const currentPath = new URL(c.req.url).pathname
         
         if (currentPath.startsWith('/meting')) {
             return `${base}/api`
@@ -67,6 +179,11 @@ app.get('/', (c) => {
     }
     
     const correctBaseUrl = getCorrectBaseUrl()
+
+    const today = new Date().toISOString().split('T')[0];
+    const totalCalls = apiStats.totalCalls;
+    const todayCalls = apiStats.dailyCalls[today] || 0;
+    const lastUpdated = new Date(apiStats.lastUpdated).toLocaleString('zh-CN');
     
     return c.html(`
 <!DOCTYPE html>
@@ -74,7 +191,7 @@ app.get('/', (c) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>初叶🍂Meting API</title> 
+    <title>初叶🍂Meting API</title>
     <style>
         * {
             margin: 0;
@@ -308,6 +425,44 @@ app.get('/', (c) => {
             margin-top: 0.5rem;
         }
         
+        .stats-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 10px;
+        }
+        
+        .stat-item {
+            text-align: center;
+            flex: 1;
+        }
+        
+        .stat-number {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            font-size: 0.85rem;
+            color: #666;
+        }
+        
+        .stat-total {
+            color: #3498db;
+        }
+        
+        .stat-today {
+            color: #2ecc71;
+        }
+        
+        .stat-divider {
+            width: 1px;
+            height: 40px;
+            background: #eee;
+            margin: 0 20px;
+        }
+        
         @keyframes float {
             0%, 100% { transform: translateY(0); }
             50% { transform: translateY(-10px); }
@@ -333,6 +488,18 @@ app.get('/', (c) => {
             .actions {
                 grid-template-columns: 1fr;
             }
+            
+            .stats-container {
+                flex-direction: column;
+            }
+            
+            .stat-item {
+                margin-bottom: 15px;
+            }
+            
+            .stat-divider {
+                display: none;
+            }
         }
     </style>
 </head>
@@ -345,8 +512,8 @@ app.get('/', (c) => {
                      style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover; border: 4px solid rgba(255, 255, 255, 0.3); box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15); background: linear-gradient(45deg, #fff, #f5f7fa); padding: 3px; animation: float 3s ease-in-out infinite;">
             </div>
             <h1 style="font-size: 2.5rem; color: #2c3e50; margin-bottom: 0.5rem; background: linear-gradient(45deg, #3498db, #2ecc71); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">初叶 Meting API</h1>
-            <p style="font-size: 1.2rem; color: #7f8c8d; margin-bottom: 1rem;">初叶MetingAPI-1.3.4</p>
-            <div style="display: inline-block; background: linear-gradient(45deg, #ff7e5f, #feb47b); color: white; padding: 0.5rem 1rem; border-radius: 50px; font-size: 0.9rem; font-weight: bold; margin-bottom: 1rem;">版本 v1.3.4</div>
+            <p style="font-size: 1.2rem; color: #7f8c8d; margin-bottom: 1rem;">初叶MetingAPI-1.3.5</p>
+            <div style="display: inline-block; background: linear-gradient(45deg, #ff7e5f, #feb47b); color: white; padding: 0.5rem 1rem; border-radius: 50px; font-size: 0.9rem; font-weight: bold; margin-bottom: 1rem;">版本 v1.3.5</div>
         </header>
         
         <div class="info-grid">
@@ -374,12 +541,26 @@ app.get('/', (c) => {
                         </span>
                     </div>
                 </div>
-                <!-- 修复后的API地址项 -->
                 <div class="info-item">
                     <div class="label">API地址</div>
                     <div class="value">
                         <a href="${apiUrl}" style="color: #3498db; text-decoration: none; word-break: break-all;">${apiUrl}</a>
-                        <br>
+                    </div>
+                </div>
+                <div class="info-item">
+                    <div class="label">API 调用统计</div>
+                    <div class="value">
+                        <div class="stats-container">
+                            <div class="stat-item">
+                                <div class="stat-number stat-total">${totalCalls.toLocaleString()}</div>
+                                <div class="stat-label">总调用次数</div>
+                            </div>
+                            <div class="stat-divider"></div>
+                            <div class="stat-item">
+                                <div class="stat-number stat-today">${todayCalls.toLocaleString()}</div>
+                                <div class="stat-label">今日调用</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -395,6 +576,10 @@ app.get('/', (c) => {
                     <div class="value">
                         <span class="status-badge status-online">运行正常</span>
                     </div>
+                </div>
+                <div class="info-item">
+                    <div class="label">统计更新</div>
+                    <div class="value">${lastUpdated}</div>
                 </div>
                 <div class="info-item">
                     <div class="label">访问地址</div>
@@ -419,27 +604,28 @@ app.get('/', (c) => {
                 <a href="${testUrl}" class="btn btn-test">前往测试</a>
             </div>
             
-<div class="action-card">
-    <div class="action-icon">
-        <img src="https://cloud.chuyel.top/f/PkZsP/tu%E5%B7%B2%E5%8E%BB%E5%BA%95.png"
-             alt="底下三栏第二个图标"
-             style="width: 60px; height: 60px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(255, 255, 255, 0.3);">
-    </div>
-    <h3>初叶🍂网站</h3>
-    <p>该项目作者的官方网站</p>
-    <a href="https://www.chuyel.top" class="btn btn-api" target="_blank">点击访问</a>
-</div>
+            <div class="action-card">
+                <div class="action-icon">
+                    <img src="https://cloud.chuyel.top/f/PkZsP/tu%E5%B7%B2%E5%8E%BB%E5%BA%95.png"
+                         alt="底下三栏第二个图标"
+                         style="width: 60px; height: 60px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(255, 255, 255, 0.3);">
+                </div>
+                <h3>初叶🍂网站</h3>
+                <p>该项目作者的官方网站</p>
+                <a href="https://www.chuyel.top" class="btn btn-api" target="_blank">点击访问</a>
+            </div>
             
             <div class="action-card">
                 <div class="action-icon">📚</div>
                 <h3>文档</h3>
                 <p>查看 API 使用文档和示例代码</p>
-                <button class="btn" onclick="alert('文档功能开发中...')">查看文档</button>
+                <a href="https://www.chuyel.top/archives/472" class="btn" target="_blank">查看文档</a>
             </div>
         </div>
         
         <footer>
-            <p>© 2024-2025 初叶 Meting API | 提供稳定可靠的API支持</p>
+            <p>© 2024-2025 初叶🍂Meting API 服务 | 提供稳定可靠的API支持</p>
+            <p>API调用统计：总 ${totalCalls.toLocaleString()} 次 | 今日 ${todayCalls.toLocaleString()} 次 | 最后更新：${lastUpdated}</p>
             <p>如有问题，请查看文档或联系技术支持</p>
         </footer>
     </div>
