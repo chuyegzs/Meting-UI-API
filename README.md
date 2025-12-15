@@ -1,4 +1,5 @@
 # 初叶🍂Meting API
+使用教程：https://www.chuyel.top/archives/472
 依据xizeyoupan作者修改的MetingAPI，我不是原作者，我只是拿他的修改！！！关于此项目的问题找我，不要骚扰原作者！！！！！
 不支持Docker安装
 
