@@ -17,7 +17,46 @@ let apiStats = {
     totalCalls: 0,
     dailyCalls: {},
     hourlyCalls: {},
-    lastUpdated: new Date().toISOString()
+    lastUpdated: new Date().toISOString(),
+    lastResetDate: new Date().toISOString().split('T')[0]
+};
+
+const checkAndResetDailyStats = () => {
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+    
+    console.log(`🔍 检查日期: 当前日期=${today}, 上次重置日期=${apiStats.lastResetDate}`);
+    
+    if (today !== apiStats.lastResetDate) {
+        console.log(`🔄 日期已变化！重置今日统计：${apiStats.lastResetDate} -> ${today}`);
+        
+        apiStats.lastResetDate = today;
+        
+        if (!apiStats.dailyCalls[today]) {
+            apiStats.dailyCalls[today] = 0;
+        }
+        
+        const twoDaysAgo = new Date(now);
+        twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+        const twoDaysAgoStr = twoDaysAgo.toISOString().split('T')[0];
+        
+        Object.keys(apiStats.hourlyCalls).forEach(key => {
+            const date = key.split('-')[0];
+            if (date < twoDaysAgoStr) {
+                delete apiStats.hourlyCalls[key];
+            }
+        });
+        
+        saveStats().then(() => {
+            console.log('💾 日期变化已保存');
+        }).catch(err => {
+            console.error('❌ 保存日期变化失败:', err);
+        });
+        
+        return true;
+    }
+    
+    return false;
 };
 
 const loadStats = async () => {
@@ -30,8 +69,15 @@ const loadStats = async () => {
             apiStats.dailyCalls = savedStats.dailyCalls || {}
             apiStats.hourlyCalls = savedStats.hourlyCalls || {}
             apiStats.lastUpdated = savedStats.lastUpdated || new Date().toISOString()
+            apiStats.lastResetDate = savedStats.lastResetDate || new Date().toISOString().split('T')[0]
             
             console.log('✅ 统计数据加载成功')
+            console.log(`📊 当前统计：总调用=${apiStats.totalCalls}, 上次重置=${apiStats.lastResetDate}`)
+            
+            const resetHappened = checkAndResetDailyStats();
+            if (resetHappened) {
+                console.log('🔄 启动时检测到日期变化，今日统计已重置');
+            }
         }
     } catch (error) {
         console.log('📝 创建新的统计文件')
@@ -43,6 +89,7 @@ const saveStats = async () => {
     try {
         apiStats.lastUpdated = new Date().toISOString()
         await fs.writeFile(STATS_FILE, JSON.stringify(apiStats, null, 2), 'utf8')
+        console.log('💾 统计数据已保存')
     } catch (error) {
         console.error('❌ 保存统计数据失败:', error)
     }
@@ -50,27 +97,39 @@ const saveStats = async () => {
 
 const updateStats = async () => {
     const now = new Date();
-    const today = now.toISOString().split('T')[0]; // YYYY-MM-DD
+    const today = now.toISOString().split('T')[0];
     const hour = now.getHours();
     
+    console.log(`📝 更新统计: 日期=${today}, 小时=${hour}`);
+    
+    checkAndResetDailyStats();
+    
     apiStats.totalCalls++;
+    console.log(`📈 总调用次数增加: ${apiStats.totalCalls}`);
+    
     apiStats.dailyCalls[today] = (apiStats.dailyCalls[today] || 0) + 1;
+    console.log(`📅 今日调用次数: ${apiStats.dailyCalls[today]}`);
+    
     const hourKey = `${today}-${hour}`;
     apiStats.hourlyCalls[hourKey] = (apiStats.hourlyCalls[hourKey] || 0) + 1;
     
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
-
+    
     Object.keys(apiStats.dailyCalls).forEach(date => {
         if (date < thirtyDaysAgoStr) {
             delete apiStats.dailyCalls[date];
         }
     });
     
+    const twoDaysAgo = new Date(now);
+    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+    const twoDaysAgoStr = twoDaysAgo.toISOString().split('T')[0];
+    
     Object.keys(apiStats.hourlyCalls).forEach(key => {
         const date = key.split('-')[0];
-        if (date < thirtyDaysAgoStr) {
+        if (date < twoDaysAgoStr) {
             delete apiStats.hourlyCalls[key];
         }
     });
@@ -82,7 +141,30 @@ const updateStats = async () => {
 
 const getTodayCalls = () => {
     const today = new Date().toISOString().split('T')[0];
+    
+    checkAndResetDailyStats();
+    
     return apiStats.dailyCalls[today] || 0;
+};
+
+const getNextResetTime = () => {
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
+    
+    const timeDiff = tomorrow.getTime() - now.getTime();
+    const hours = Math.floor(timeDiff / (1000 * 60 * 60));
+    const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((timeDiff % (1000 * 60)) / 1000);
+    
+    return {
+        time: tomorrow.toLocaleString('zh-CN'),
+        hours,
+        minutes,
+        seconds,
+        formatted: `${hours}小时${minutes}分${seconds}秒后`
+    };
 };
 
 loadStats();
@@ -94,6 +176,11 @@ app.use('/api', async (c, next) => {
     }
 });
 
+app.use('*', async (c, next) => {
+    checkAndResetDailyStats();
+    await next();
+});
+
 app.use('*', cors())
 app.use('*', logger())
 app.get('/api', api)
@@ -102,6 +189,9 @@ app.get('/test', handler)
 app.get('/stats', (c) => {
     const today = new Date().toISOString().split('T')[0];
     const todayCalls = apiStats.dailyCalls[today] || 0;
+    const nextReset = getNextResetTime();
+    
+    checkAndResetDailyStats();
     
     return c.json({
         success: true,
@@ -111,20 +201,48 @@ app.get('/stats', (c) => {
             dailyStats: apiStats.dailyCalls,
             hourlyStats: apiStats.hourlyCalls,
             lastUpdated: apiStats.lastUpdated,
+            lastResetDate: apiStats.lastResetDate,
+            nextReset: nextReset.time,
+            timeToReset: nextReset.formatted,
+            resetInfo: "总调用次数永不重置，今日调用每天00:00自动重置",
             timestamp: new Date().toISOString()
         }
     });
 });
 
-app.post('/stats/reset', async (c) => {
+app.post('/stats/reset-today', async (c) => {
+    const today = new Date().toISOString().split('T')[0];
+    
+    apiStats.dailyCalls[today] = 0;
+    apiStats.lastResetDate = today;
+    
+    await saveStats();
+    return c.json({ 
+        success: true, 
+        message: '今日统计已重置',
+        resetDate: today,
+        totalCalls: apiStats.totalCalls,
+        todayCalls: 0
+    });
+});
+
+app.post('/stats/reset-all', async (c) => {
+    const today = new Date().toISOString().split('T')[0];
+    
     apiStats = {
         totalCalls: 0,
         dailyCalls: {},
         hourlyCalls: {},
-        lastUpdated: new Date().toISOString()
+        lastUpdated: new Date().toISOString(),
+        lastResetDate: today
     };
+    
     await saveStats();
-    return c.json({ success: true, message: '统计数据已重置' });
+    return c.json({ 
+        success: true, 
+        message: '所有统计数据已重置',
+        warning: '总调用次数也被重置了！'
+    });
 });
 
 app.get('/', (c) => {
@@ -141,6 +259,8 @@ app.get('/', (c) => {
 
     const runtime = get_runtime()
     const baseUrl = get_url(c)
+    
+    checkAndResetDailyStats();
     
     const getApiUrl = () => {
         const protocol = c.req.header('X-Forwarded-Proto') || 'https'
@@ -179,11 +299,12 @@ app.get('/', (c) => {
     }
     
     const correctBaseUrl = getCorrectBaseUrl()
-
+    
     const today = new Date().toISOString().split('T')[0];
     const totalCalls = apiStats.totalCalls;
     const todayCalls = apiStats.dailyCalls[today] || 0;
     const lastUpdated = new Date(apiStats.lastUpdated).toLocaleString('zh-CN');
+    const nextReset = getNextResetTime();
     
     return c.html(`
 <!DOCTYPE html>
@@ -511,9 +632,9 @@ app.get('/', (c) => {
                      alt="初叶Logo" 
                      style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover; border: 4px solid rgba(255, 255, 255, 0.3); box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15); background: linear-gradient(45deg, #fff, #f5f7fa); padding: 3px; animation: float 3s ease-in-out infinite;">
             </div>
-            <h1 style="font-size: 2.5rem; color: #2c3e50; margin-bottom: 0.5rem; background: linear-gradient(45deg, #3498db, #2ecc71); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">初叶 Meting API</h1>
-            <p style="font-size: 1.2rem; color: #7f8c8d; margin-bottom: 1rem;">初叶MetingAPI-1.3.5</p>
-            <div style="display: inline-block; background: linear-gradient(45deg, #ff7e5f, #feb47b); color: white; padding: 0.5rem 1rem; border-radius: 50px; font-size: 0.9rem; font-weight: bold; margin-bottom: 1rem;">版本 v1.3.5</div>
+            <h1 style="font-size: 2.5rem; color: #2c3e50; margin-bottom: 0.5rem; background: linear-gradient(45deg, #3498db, #2ecc71); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">初叶🍂Meting API</h1>
+            <p style="font-size: 1.2rem; color: #7f8c8d; margin-bottom: 1rem;">初叶🍂Meting API-1.3.6</p>
+            <div style="display: inline-block; background: linear-gradient(45deg, #ff7e5f, #feb47b); color: white; padding: 0.5rem 1rem; border-radius: 50px; font-size: 0.9rem; font-weight: bold; margin-bottom: 1rem;">版本 v1.3.6</div>
         </header>
         
         <div class="info-grid">
@@ -606,8 +727,8 @@ app.get('/', (c) => {
             
             <div class="action-card">
                 <div class="action-icon">
-                    <img src="https://cloud.chuyel.top/f/PkZsP/tu%E5%B7%B2%E5%8E%BB%E5%BA%95.png"
-                         alt="底下三栏第二个图标"
+                    <img src="https://cloud.chuyel.top/f/PkZsP/tu%E5%B7%B2%E5%8E%BB%E5%BA%95.png" 
+                         alt="初叶图标"
                          style="width: 60px; height: 60px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(255, 255, 255, 0.3);">
                 </div>
                 <h3>初叶🍂网站</h3>
@@ -618,20 +739,19 @@ app.get('/', (c) => {
             <div class="action-card">
                 <div class="action-icon">📚</div>
                 <h3>文档</h3>
-                <p>查看 API 使用文档和示例代码</p>
+                <p>查看 API 使用文档</p>
                 <a href="https://www.chuyel.top/archives/472" class="btn" target="_blank">查看文档</a>
             </div>
         </div>
         
         <footer>
             <p>© 2024-2025 初叶🍂Meting API 服务 | 提供稳定可靠的API支持</p>
-            <p>API调用统计：总 ${totalCalls.toLocaleString()} 次 | 今日 ${todayCalls.toLocaleString()} 次 | 最后更新：${lastUpdated}</p>
-            <p>如有问题，请查看文档或联系技术支持</p>
+            <p>API调用统计：总 ${totalCalls.toLocaleString()} 次 | 今日 ${todayCalls.toLocaleString()} 次 | 下次重置：${nextReset.time}</p>
+            <p>最后更新：${lastUpdated} | 如有问题，请查看文档或联系技术支持</p>
         </footer>
     </div>
     
     <script>
-        // 实时更新时间
         function updateTime() {
             const now = new Date();
             const options = {
@@ -651,10 +771,8 @@ app.get('/', (c) => {
             }
         }
         
-        // 每秒更新一次时间
         setInterval(updateTime, 1000);
         
-        // 添加简单的页面加载动画
         document.addEventListener('DOMContentLoaded', function() {
             const cards = document.querySelectorAll('.info-card, .action-card');
             cards.forEach((card, index) => {
@@ -668,6 +786,17 @@ app.get('/', (c) => {
                 }, index * 100);
             });
         });
+        
+        setInterval(() => {
+            const now = new Date();
+            const hours = now.getHours();
+            const minutes = now.getMinutes();
+            
+            if (hours === 0 && minutes < 5) {
+                console.log('🕛 检测到00:00，刷新页面获取最新统计');
+                window.location.reload();
+            }
+        }, 300000);
     </script>
 </body>
 </html>
