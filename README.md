@@ -8,11 +8,13 @@ Vercel:
 
 1.先Fork仓库到自己Github账户
 
-2.登录Vercel并选择自己刚刚Fork的本仓库
+2.修改/src/providers/你的所属账号（网易云，QQ......）（netease为网易云，tencent为QQ音乐，请看上面的使用教程修改）
+
+2.登录Vercel并选择自己刚刚Fork并修改的本仓库
 
 3.直接下一步即可安装成功，要在国内访问请绑定自己的域名
 
-
+.
 
 宝塔面板:
 
@@ -25,6 +27,8 @@ Vercel:
 启动命令：node node.js
 
 运行用户：root（www用户运行会报错）
+
+运行之前先修改/src/providers/你的所属账号（网易云，QQ......）（netease为网易云，tencent为QQ音乐，请看上面的使用教程修改）
 
 有时间我再写完，我是懒人，不知道啥时候会更新，目前还在更新中
 <img width="1671" height="1001" alt="b9b06d900ce10e126c6e3884f84886d9" src="https://github.com/user-attachments/assets/d12cb006-642a-497e-9fa0-1f0c2a04e306" />
