@@ -16,6 +16,6 @@ Vercel:
 启动命令：node node.js
 运行用户：root（www用户运行会报错）
 
-有时间我再写完，我是懒人，后面不会更新
+有时间我再写完，我是懒人，不知道啥时候会更新，目前还在更新中
 <img width="1671" height="1001" alt="b9b06d900ce10e126c6e3884f84886d9" src="https://github.com/user-attachments/assets/d12cb006-642a-497e-9fa0-1f0c2a04e306" />
 交流群：1048889481（记得点Star）
