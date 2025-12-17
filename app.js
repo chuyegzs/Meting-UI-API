@@ -318,15 +318,65 @@ app.get('/', (c) => {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
+            transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+        }
+        
+        /* 深色主题变量 */
+        :root {
+            --bg-gradient: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), 
+                          url('https://api.boxmoe.com/random.php?size=mw1024') no-repeat center center fixed;
+            --bg-overlay: rgba(0, 0, 0, 0.4);
+            --header-bg: rgba(255, 255, 255, 0.15);
+            --card-bg: rgba(255, 255, 255, 0.15);
+            --card-bg-hover: rgba(255, 255, 255, 0.2);
+            --text-primary: #ffffff;
+            --text-secondary: rgba(255, 255, 255, 0.9);
+            --text-muted: rgba(255, 255, 255, 0.8);
+            --border-color: rgba(255, 255, 255, 0.2);
+            --shadow-color: rgba(0, 0, 0, 0.3);
+            --accent-color: #3498db;
+            --accent-hover: #2980b9;
+            --success-color: #2ecc71;
+            --warning-color: #ff6b6b;
+            --btn-primary: linear-gradient(45deg, #3498db, #2980b9);
+            --btn-success: linear-gradient(45deg, #2ecc71, #27ae60);
+            --btn-purple: linear-gradient(45deg, #9b59b6, #8e44ad);
+            --btn-orange: linear-gradient(45deg, #ff7e5f, #feb47b);
+            --stat-total: #3498db;
+            --stat-today: #2ecc71;
+        }
+        
+        /* 浅色主题变量 */
+        [data-theme="light"] {
+            --bg-gradient: linear-gradient(rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.8)), 
+                          url('https://api.boxmoe.com/random.php?size=mw1024') no-repeat center center fixed;
+            --bg-overlay: rgba(255, 255, 255, 0.4);
+            --header-bg: rgba(255, 255, 255, 0.9);
+            --card-bg: rgba(255, 255, 255, 0.85);
+            --card-bg-hover: rgba(255, 255, 255, 0.95);
+            --text-primary: #2c3e50;
+            --text-secondary: #34495e;
+            --text-muted: #7f8c8d;
+            --border-color: rgba(0, 0, 0, 0.1);
+            --shadow-color: rgba(0, 0, 0, 0.15);
+            --accent-color: #3498db;
+            --accent-hover: #2980b9;
+            --success-color: #2ecc71;
+            --warning-color: #e74c3c;
+            --btn-primary: linear-gradient(45deg, #3498db, #2980b9);
+            --btn-success: linear-gradient(45deg, #2ecc71, #27ae60);
+            --btn-purple: linear-gradient(45deg, #9b59b6, #8e44ad);
+            --btn-orange: linear-gradient(45deg, #ff7e5f, #feb47b);
+            --stat-total: #3498db;
+            --stat-today: #2ecc71;
         }
         
         body {
             font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
-            background: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), 
-                        url('https://api.boxmoe.com/random.php?size=mw1024') no-repeat center center fixed;
+            background: var(--bg-gradient);
             background-size: cover;
             min-height: 100vh;
-            color: #fff;
+            color: var(--text-primary);
             line-height: 1.6;
             position: relative;
         }
@@ -338,8 +388,59 @@ app.get('/', (c) => {
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.4);
+            background: var(--bg-overlay);
             z-index: -1;
+        }
+        
+        /* 主题切换按钮 */
+        .theme-toggle {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 50px;
+            padding: 8px 16px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 4px 15px var(--shadow-color);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .theme-toggle:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px var(--shadow-color);
+        }
+        
+        .theme-toggle span {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        .theme-icon {
+            font-size: 1.2rem;
+            transition: transform 0.3s ease;
+        }
+        
+        [data-theme="light"] .theme-icon.sun {
+            display: none;
+        }
+        
+        [data-theme="light"] .theme-icon.moon {
+            display: inline;
+        }
+        
+        [data-theme="dark"] .theme-icon.sun {
+            display: inline;
+        }
+        
+        [data-theme="dark"] .theme-icon.moon {
+            display: none;
         }
         
         .container {
@@ -352,11 +453,11 @@ app.get('/', (c) => {
             text-align: center;
             margin-bottom: 3rem;
             padding: 2rem;
-            background: rgba(255, 255, 255, 0.15);
+            background: var(--header-bg);
             border-radius: 20px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 10px 30px var(--shadow-color);
             backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            border: 1px solid var(--border-color);
         }
         
         .logo {
@@ -367,28 +468,28 @@ app.get('/', (c) => {
         
         h1 {
             font-size: 2.5rem;
-            color: #fff;
+            color: var(--text-primary);
             margin-bottom: 0.5rem;
-            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            text-shadow: 0 2px 10px var(--shadow-color);
         }
         
         .tagline {
             font-size: 1.2rem;
-            color: rgba(255, 255, 255, 0.9);
+            color: var(--text-secondary);
             margin-bottom: 1rem;
-            text-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);
+            text-shadow: 0 1px 5px var(--shadow-color);
         }
         
         .version-badge {
             display: inline-block;
-            background: linear-gradient(45deg, #ff7e5f, #feb47b);
+            background: var(--btn-orange);
             color: white;
             padding: 0.5rem 1rem;
             border-radius: 50px;
             font-size: 0.9rem;
             font-weight: bold;
             margin-bottom: 1rem;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 4px 15px var(--shadow-color);
         }
         
         .info-grid {
@@ -399,28 +500,28 @@ app.get('/', (c) => {
         }
         
         .info-card {
-            background: rgba(255, 255, 255, 0.15);
+            background: var(--card-bg);
             padding: 1.5rem;
             border-radius: 15px;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 5px 15px var(--shadow-color);
             transition: transform 0.3s ease, box-shadow 0.3s ease;
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            border: 1px solid var(--border-color);
             backdrop-filter: blur(10px);
         }
         
         .info-card:hover {
             transform: translateY(-5px);
-            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.3);
-            background: rgba(255, 255, 255, 0.2);
+            box-shadow: 0 15px 30px var(--shadow-color);
+            background: var(--card-bg-hover);
         }
         
         .info-card h3 {
-            color: #fff;
+            color: var(--accent-color);
             margin-bottom: 1rem;
             display: flex;
             align-items: center;
             gap: 0.5rem;
-            text-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);
+            text-shadow: 0 1px 5px var(--shadow-color);
         }
         
         .info-card h3::before {
@@ -431,7 +532,7 @@ app.get('/', (c) => {
         .info-item {
             margin-bottom: 1rem;
             padding-bottom: 1rem;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            border-bottom: 1px solid var(--border-color);
         }
         
         .info-item:last-child {
@@ -442,24 +543,25 @@ app.get('/', (c) => {
         
         .label {
             font-weight: 600;
-            color: rgba(255, 255, 255, 0.9);
+            color: var(--text-secondary);
             margin-bottom: 0.25rem;
-            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+            text-shadow: 0 1px 3px var(--shadow-color);
         }
         
         .value {
-            color: #fff;
+            color: var(--text-primary);
             word-break: break-all;
-            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+            text-shadow: 0 1px 3px var(--shadow-color);
         }
         
         .value a {
-            color: #3498db;
+            color: var(--accent-color);
             text-decoration: none;
+            text-shadow: none;
         }
         
         .value a:hover {
-            color: #2980b9;
+            color: var(--accent-hover);
         }
         
         .status-badge {
@@ -469,16 +571,16 @@ app.get('/', (c) => {
             font-size: 0.85rem;
             font-weight: 600;
             margin-left: 0.5rem;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 2px 8px var(--shadow-color);
         }
         
         .status-online {
-            background: linear-gradient(45deg, #2ecc71, #27ae60);
+            background: var(--btn-success);
             color: white;
         }
         
         .status-local {
-            background: linear-gradient(45deg, #3498db, #2980b9);
+            background: var(--btn-primary);
             color: white;
         }
         
@@ -490,45 +592,45 @@ app.get('/', (c) => {
         }
         
         .action-card {
-            background: rgba(255, 255, 255, 0.15);
+            background: var(--card-bg);
             padding: 2rem;
             border-radius: 15px;
             text-align: center;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 5px 15px var(--shadow-color);
             transition: all 0.3s ease;
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            border: 1px solid var(--border-color);
             backdrop-filter: blur(10px);
         }
         
         .action-card:hover {
             transform: translateY(-5px);
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
-            background: rgba(255, 255, 255, 0.2);
+            box-shadow: 0 20px 40px var(--shadow-color);
+            background: var(--card-bg-hover);
         }
         
         .action-icon {
             font-size: 3rem;
             margin-bottom: 1rem;
-            filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.3));
+            filter: drop-shadow(0 2px 5px var(--shadow-color));
         }
         
         .action-card h3 {
-            color: #fff;
+            color: var(--text-primary);
             margin-bottom: 1rem;
-            text-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);
+            text-shadow: 0 1px 5px var(--shadow-color);
         }
         
         .action-card p {
-            color: rgba(255, 255, 255, 0.9);
+            color: var(--text-secondary);
             margin-bottom: 1.5rem;
             font-size: 0.95rem;
-            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+            text-shadow: 0 1px 3px var(--shadow-color);
         }
         
         .btn {
             display: inline-block;
             padding: 0.75rem 1.5rem;
-            background: linear-gradient(45deg, #3498db, #2980b9);
+            background: var(--btn-primary);
             color: white;
             text-decoration: none;
             border-radius: 50px;
@@ -537,7 +639,7 @@ app.get('/', (c) => {
             border: none;
             cursor: pointer;
             font-size: 1rem;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 4px 15px var(--shadow-color);
         }
         
         .btn:hover {
@@ -546,7 +648,7 @@ app.get('/', (c) => {
         }
         
         .btn-api {
-            background: linear-gradient(45deg, #9b59b6, #8e44ad);
+            background: var(--btn-purple);
         }
         
         .btn-api:hover {
@@ -554,7 +656,7 @@ app.get('/', (c) => {
         }
         
         .btn-test {
-            background: linear-gradient(45deg, #2ecc71, #27ae60);
+            background: var(--btn-success);
         }
         
         .btn-test:hover {
@@ -565,20 +667,20 @@ app.get('/', (c) => {
             text-align: center;
             margin-top: 3rem;
             padding: 2rem;
-            color: rgba(255, 255, 255, 0.8);
+            color: var(--text-muted);
             font-size: 0.9rem;
-            background: rgba(0, 0, 0, 0.2);
+            background: var(--card-bg);
             border-radius: 15px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            border: 1px solid var(--border-color);
             backdrop-filter: blur(10px);
         }
         
         .time-display {
             font-size: 1.1rem;
-            color: #ff6b6b;
+            color: var(--warning-color);
             font-weight: 600;
             margin-top: 0.5rem;
-            text-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);
+            text-shadow: 0 1px 5px var(--shadow-color);
         }
         
         .stats-container {
@@ -597,33 +699,42 @@ app.get('/', (c) => {
             font-size: 1.5rem;
             font-weight: bold;
             margin-bottom: 5px;
-            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            text-shadow: 0 2px 8px var(--shadow-color);
         }
         
         .stat-label {
             font-size: 0.85rem;
-            color: rgba(255, 255, 255, 0.9);
-            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+            color: var(--text-secondary);
+            text-shadow: 0 1px 3px var(--shadow-color);
         }
         
         .stat-total {
-            color: #3498db;
+            color: var(--stat-total);
         }
         
         .stat-today {
-            color: #2ecc71;
+            color: var(--stat-today);
         }
         
         .stat-divider {
             width: 1px;
             height: 40px;
-            background: rgba(255, 255, 255, 0.2);
+            background: var(--border-color);
             margin: 0 20px;
         }
         
         @keyframes float {
             0%, 100% { transform: translateY(0); }
             50% { transform: translateY(-10px); }
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .spinning {
+            animation: spin 0.5s linear;
         }
         
         @media (max-width: 768px) {
@@ -637,6 +748,12 @@ app.get('/', (c) => {
             
             .logo {
                 font-size: 2.5rem;
+            }
+            
+            .theme-toggle {
+                top: 10px;
+                right: 10px;
+                padding: 6px 12px;
             }
             
             .info-grid {
@@ -662,16 +779,23 @@ app.get('/', (c) => {
     </style>
 </head>
 <body>
+    <!-- 主题切换按钮 -->
+    <div class="theme-toggle" id="themeToggle" title="切换深色/浅色模式">
+        <span class="theme-icon sun">🌞</span>
+        <span class="theme-icon moon">🌙</span>
+        <span id="themeText">深色模式</span>
+    </div>
+    
     <div class="container">
-        <header style="text-align: center; margin-bottom: 3rem; padding: 2rem; background: rgba(255, 255, 255, 0.15); border-radius: 20px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2);">
+        <header style="text-align: center; margin-bottom: 3rem; padding: 2rem; background: var(--header-bg); border-radius: 20px; box-shadow: 0 10px 30px var(--shadow-color); backdrop-filter: blur(10px); border: 1px solid var(--border-color);">
             <div style="font-size: 3.5rem; margin-bottom: 1rem; animation: float 3s ease-in-out infinite; display: flex; justify-content: center; align-items: center;">
                 <img src="https://cloud.chuyel.top/f/PkZsP/tu%E5%B7%B2%E5%8E%BB%E5%BA%95.png" 
                      alt="初叶Logo" 
-                     style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover; border: 4px solid rgba(255, 255, 255, 0.3); box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3); background: linear-gradient(45deg, rgba(255, 255, 255, 0.3), rgba(245, 247, 250, 0.3)); padding: 3px; animation: float 3s ease-in-out infinite;">
+                     style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover; border: 4px solid var(--border-color); box-shadow: 0 8px 25px var(--shadow-color); background: var(--card-bg); padding: 3px; animation: float 3s ease-in-out infinite;">
             </div>
-            <h1 style="font-size: 2.5rem; color: #fff; margin-bottom: 0.5rem; text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);">初叶🍂Meting API</h1>
-            <p style="font-size: 1.2rem; color: rgba(255, 255, 255, 0.9); margin-bottom: 1rem; text-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);">初叶🍂Meting API-1.3.7</p>
-            <div style="display: inline-block; background: linear-gradient(45deg, #ff7e5f, #feb47b); color: white; padding: 0.5rem 1rem; border-radius: 50px; font-size: 0.9rem; font-weight: bold; margin-bottom: 1rem; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);">版本 v1.3.7</div>
+            <h1 style="font-size: 2.5rem; color: var(--text-primary); margin-bottom: 0.5rem; text-shadow: 0 2px 10px var(--shadow-color);">初叶🍂Meting API</h1>
+            <p style="font-size: 1.2rem; color: var(--text-secondary); margin-bottom: 1rem; text-shadow: 0 1px 5px var(--shadow-color);">初叶🍂Meting API-1.3.8</p>
+            <div style="display: inline-block; background: var(--btn-orange); color: white; padding: 0.5rem 1rem; border-radius: 50px; font-size: 0.9rem; font-weight: bold; margin-bottom: 1rem; box-shadow: 0 4px 15px var(--shadow-color);">版本 v1.3.8</div>
         </header>
         
         <div class="info-grid">
@@ -702,7 +826,7 @@ app.get('/', (c) => {
                 <div class="info-item">
                     <div class="label">API地址</div>
                     <div class="value">
-                        <a href="${apiUrl}" style="color: #3498db; text-decoration: none; word-break: break-all;">${apiUrl}</a>
+                        <a href="${apiUrl}" style="color: var(--accent-color); text-decoration: none; word-break: break-all;">${apiUrl}</a>
                     </div>
                 </div>
                 <div class="info-item">
@@ -742,13 +866,13 @@ app.get('/', (c) => {
                 <div class="info-item">
                     <div class="label">访问地址</div>
                     <div class="value">
-                        <a href="${c.req.url}" style="color: #3498db; text-decoration: none;">${c.req.url}</a>
+                        <a href="${c.req.url}" style="color: var(--accent-color); text-decoration: none;">${c.req.url}</a>
                     </div>
                 </div>
                 <div class="info-item">
                     <div class="label">实际地址</div>
                     <div class="value">
-                        <a href="${correctBaseUrl}" style="color: #3498db; text-decoration: none;">${correctBaseUrl}</a>
+                        <a href="${correctBaseUrl}" style="color: var(--accent-color); text-decoration: none;">${correctBaseUrl}</a>
                     </div>
                 </div>
             </div>
@@ -766,7 +890,7 @@ app.get('/', (c) => {
                 <div class="action-icon">
                     <img src="https://cloud.chuyel.top/f/PkZsP/tu%E5%B7%B2%E5%8E%BB%E5%BA%95.png" 
                          alt="初叶图标"
-                         style="width: 60px; height: 60px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(255, 255, 255, 0.3); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);">
+                         style="width: 60px; height: 60px; border-radius: 50%; object-fit: cover; border: 2px solid var(--border-color); box-shadow: 0 4px 15px var(--shadow-color);">
                 </div>
                 <h3>初叶🍂网站</h3>
                 <p>该项目作者的官方网站</p>
@@ -782,13 +906,97 @@ app.get('/', (c) => {
         </div>
         
         <footer>
-            <p>© 2024-2025 初叶🍂Meting API 服务 | 提供稳定可靠的API支持</p>
+            <p>© 2024-2025 初叶🍂Meting API| 提供稳定可靠的API支持</p>
             <p>API调用统计：总 ${totalCalls.toLocaleString()} 次 | 今日 ${todayCalls.toLocaleString()} 次 | 下次重置：${nextReset.time}</p>
             <p>最后更新：${lastUpdated} | 如有问题，请查看文档或联系技术支持</p>
+            <p style="margin-top: 10px; font-size: 0.8rem; color: var(--text-muted);">
+                当前主题：<span id="currentTheme">深色模式</span>
+            </p>
         </footer>
     </div>
     
     <script>
+        // 主题切换功能
+        const themeToggle = document.getElementById('themeToggle');
+        const themeText = document.getElementById('themeText');
+        const currentThemeSpan = document.getElementById('currentTheme');
+        const html = document.documentElement;
+        
+        // 从localStorage获取保存的主题，或者根据系统偏好设置
+        const savedTheme = localStorage.getItem('theme');
+        const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        
+        // 初始化主题
+        function initTheme() {
+            let theme = 'dark'; // 默认深色
+            
+            if (savedTheme) {
+                theme = savedTheme;
+            } else if (systemPrefersDark) {
+                theme = 'dark';
+            } else {
+                theme = 'light';
+            }
+            
+            applyTheme(theme);
+        }
+        
+        // 应用主题
+        function applyTheme(theme) {
+            html.setAttribute('data-theme', theme);
+            
+            if (theme === 'light') {
+                themeText.textContent = '浅色模式';
+                currentThemeSpan.textContent = '浅色模式';
+            } else {
+                themeText.textContent = '深色模式';
+                currentThemeSpan.textContent = '深色模式';
+            }
+            
+            // 保存到localStorage
+            localStorage.setItem('theme', theme);
+            
+            // 添加旋转动画
+            const icon = themeToggle.querySelector('.theme-icon');
+            icon.classList.add('spinning');
+            setTimeout(() => {
+                icon.classList.remove('spinning');
+            }, 500);
+            
+            // 更新背景图片
+            updateBackgroundImage();
+        }
+        
+        // 切换主题
+        function toggleTheme() {
+            const currentTheme = html.getAttribute('data-theme') || 'dark';
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            applyTheme(newTheme);
+        }
+        
+        // 更新背景图片
+        function updateBackgroundImage() {
+            const currentTheme = html.getAttribute('data-theme') || 'dark';
+            const bgOverlay = currentTheme === 'dark' 
+                ? 'linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5))' 
+                : 'linear-gradient(rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.8))';
+            
+            document.body.style.background = bgOverlay + ', url("https://api.boxmoe.com/random.php?size=mw1024") no-repeat center center fixed';
+            document.body.style.backgroundSize = 'cover';
+        }
+        
+        // 事件监听
+        themeToggle.addEventListener('click', toggleTheme);
+        
+        // 监听系统主题变化
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+            if (!savedTheme) { // 如果用户没有手动选择主题
+                const newTheme = e.matches ? 'dark' : 'light';
+                applyTheme(newTheme);
+            }
+        });
+        
+        // 实时更新时间
         function updateTime() {
             const now = new Date();
             const options = {
@@ -808,9 +1016,14 @@ app.get('/', (c) => {
             }
         }
         
+        // 每秒更新一次时间
         setInterval(updateTime, 1000);
         
+        // 添加简单的页面加载动画
         document.addEventListener('DOMContentLoaded', function() {
+            // 初始化主题
+            initTheme();
+            
             const cards = document.querySelectorAll('.info-card, .action-card');
             cards.forEach((card, index) => {
                 card.style.opacity = '0';
@@ -824,29 +1037,44 @@ app.get('/', (c) => {
             });
         });
         
+        // 每5分钟检查一次是否需要重置（客户端辅助）
         setInterval(() => {
             const now = new Date();
             const hours = now.getHours();
             const minutes = now.getMinutes();
             
+            // 如果是00:00附近，刷新页面以获取最新统计
             if (hours === 0 && minutes < 5) {
                 console.log('🕛 检测到00:00，刷新页面获取最新统计');
                 window.location.reload();
             }
         }, 300000);
         
-        // 背景图片加载处理
+        // 添加键盘快捷键 (Ctrl+Shift+T 切换主题)
+        document.addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.shiftKey && e.key === 'T') {
+                e.preventDefault();
+                toggleTheme();
+            }
+        });
+        
+        // 背景图片加载完成后的处理
         window.addEventListener('load', function() {
             const bgImage = new Image();
             bgImage.src = 'https://api.boxmoe.com/random.php?size=mw1024';
             bgImage.onload = function() {
                 console.log('🎨 背景图片加载完成');
-                document.body.style.background = 'linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), url(\\'' + this.src + '\\') no-repeat center center fixed';
-                document.body.style.backgroundSize = 'cover';
+                updateBackgroundImage();
             };
             bgImage.onerror = function() {
                 console.log('⚠️ 背景图片加载失败，使用备用背景');
                 document.body.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                const currentTheme = html.getAttribute('data-theme') || 'dark';
+                if (currentTheme === 'dark') {
+                    document.body.style.background = 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)';
+                } else {
+                    document.body.style.background = 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)';
+                }
             };
         });
     </script>
