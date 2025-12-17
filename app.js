@@ -1068,7 +1068,6 @@ app.get('/', (c) => {
             };
             bgImage.onerror = function() {
                 console.log('⚠️ 背景图片加载失败，使用备用背景');
-                document.body.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
                 const currentTheme = html.getAttribute('data-theme') || 'dark';
                 if (currentTheme === 'dark') {
                     document.body.style.background = 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)';
