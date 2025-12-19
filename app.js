@@ -7,7 +7,6 @@ import config from './src/config.js'
 import { get_runtime, get_url } from './src/util.js'
 import fs from 'fs/promises'
 import { existsSync } from 'fs'
-import path from 'path'
 
 const app = new Hono()
 
@@ -21,22 +20,48 @@ let apiStats = {
     lastResetDate: new Date().toISOString().split('T')[0]
 };
 
-const checkAndResetDailyStats = () => {
+const getBeijingDate = () => {
     const now = new Date();
-    const today = now.toISOString().split('T')[0];
+    const beijingTime = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+    return beijingTime;
+};
+
+const getBeijingDateString = () => {
+    const beijingDate = getBeijingDate();
+    return beijingDate.toISOString().split('T')[0];
+};
+
+const getBeijingHour = () => {
+    const beijingDate = getBeijingDate();
+    return beijingDate.getUTCHours();
+};
+
+const checkAndResetDailyStats = () => {
+    const beijingDate = getBeijingDate();
+    const today = getBeijingDateString();
+    const hour = getBeijingHour();
     
-    console.log(`🔍 检查日期: 当前日期=${today}, 上次重置日期=${apiStats.lastResetDate}`);
+    console.log(`🔍 检查日期重置: 日期=${today} ${hour}:00, 上次重置日期=${apiStats.lastResetDate}`);
+    console.log(`🌍 服务器时间: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`);
     
     if (today !== apiStats.lastResetDate) {
         console.log(`🔄 日期已变化！重置今日统计：${apiStats.lastResetDate} -> ${today}`);
         
         apiStats.lastResetDate = today;
         
-        if (!apiStats.dailyCalls[today]) {
-            apiStats.dailyCalls[today] = 0;
-        }
+        apiStats.dailyCalls[today] = 0;
         
-        const twoDaysAgo = new Date(now);
+        const thirtyDaysAgo = new Date(beijingDate);
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
+        
+        Object.keys(apiStats.dailyCalls).forEach(date => {
+            if (date < thirtyDaysAgoStr) {
+                delete apiStats.dailyCalls[date];
+            }
+        });
+        
+        const twoDaysAgo = new Date(beijingDate);
         twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
         const twoDaysAgoStr = twoDaysAgo.toISOString().split('T')[0];
         
@@ -46,6 +71,8 @@ const checkAndResetDailyStats = () => {
                 delete apiStats.hourlyCalls[key];
             }
         });
+        
+        console.log(`✅ 今日统计已重置为: ${apiStats.dailyCalls[today]}`);
         
         saveStats().then(() => {
             console.log('💾 日期变化已保存');
@@ -69,7 +96,7 @@ const loadStats = async () => {
             apiStats.dailyCalls = savedStats.dailyCalls || {}
             apiStats.hourlyCalls = savedStats.hourlyCalls || {}
             apiStats.lastUpdated = savedStats.lastUpdated || new Date().toISOString()
-            apiStats.lastResetDate = savedStats.lastResetDate || new Date().toISOString().split('T')[0]
+            apiStats.lastResetDate = savedStats.lastResetDate || getBeijingDateString()
             
             console.log('✅ 统计数据加载成功')
             console.log(`📊 当前统计：总调用=${apiStats.totalCalls}, 上次重置=${apiStats.lastResetDate}`)
@@ -96,9 +123,8 @@ const saveStats = async () => {
 }
 
 const updateStats = async () => {
-    const now = new Date();
-    const today = now.toISOString().split('T')[0];
-    const hour = now.getHours();
+    const today = getBeijingDateString();
+    const hour = getBeijingHour();
     
     console.log(`📝 更新统计: 日期=${today}, 小时=${hour}`);
     
@@ -113,7 +139,7 @@ const updateStats = async () => {
     const hourKey = `${today}-${hour}`;
     apiStats.hourlyCalls[hourKey] = (apiStats.hourlyCalls[hourKey] || 0) + 1;
     
-    const thirtyDaysAgo = new Date();
+    const thirtyDaysAgo = getBeijingDate();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
     
@@ -123,7 +149,7 @@ const updateStats = async () => {
         }
     });
     
-    const twoDaysAgo = new Date(now);
+    const twoDaysAgo = getBeijingDate();
     twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
     const twoDaysAgoStr = twoDaysAgo.toISOString().split('T')[0];
     
@@ -140,7 +166,7 @@ const updateStats = async () => {
 };
 
 const getTodayCalls = () => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getBeijingDateString();
     
     checkAndResetDailyStats();
     
@@ -148,7 +174,7 @@ const getTodayCalls = () => {
 };
 
 const getNextResetTime = () => {
-    const now = new Date();
+    const now = getBeijingDate();
     const tomorrow = new Date(now);
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(0, 0, 0, 0);
@@ -158,12 +184,24 @@ const getNextResetTime = () => {
     const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((timeDiff % (1000 * 60)) / 1000);
     
+    const timeStr = tomorrow.toLocaleString('zh-CN', { 
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        weekday: 'long',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    });
+    
     return {
-        time: tomorrow.toLocaleString('zh-CN'),
+        time: timeStr,
         hours,
         minutes,
         seconds,
-        formatted: `${hours}小时${minutes}分${seconds}秒后`
+        formatted: hours + '小时' + minutes + '分' + seconds + '秒后'
     };
 };
 
@@ -171,7 +209,7 @@ loadStats();
 
 app.use('/api', async (c, next) => {
     await next();
-    if (c.res.status === 200) {
+    if (c.req.url.includes('/api') && c.res.status === 200) {
         await updateStats();
     }
 });
@@ -187,7 +225,7 @@ app.get('/api', api)
 app.get('/test', handler)
 
 app.get('/stats', (c) => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getBeijingDateString();
     const todayCalls = apiStats.dailyCalls[today] || 0;
     const nextReset = getNextResetTime();
     
@@ -205,13 +243,15 @@ app.get('/stats', (c) => {
             nextReset: nextReset.time,
             timeToReset: nextReset.formatted,
             resetInfo: "总调用次数永不重置，今日调用每天00:00自动重置",
+            resetTime: "00:00",
+            serverTime: new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }),
             timestamp: new Date().toISOString()
         }
     });
 });
 
 app.post('/stats/reset-today', async (c) => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getBeijingDateString();
     
     apiStats.dailyCalls[today] = 0;
     apiStats.lastResetDate = today;
@@ -221,13 +261,14 @@ app.post('/stats/reset-today', async (c) => {
         success: true, 
         message: '今日统计已重置',
         resetDate: today,
+        resetTime: "00:00",
         totalCalls: apiStats.totalCalls,
         todayCalls: 0
     });
 });
 
 app.post('/stats/reset-all', async (c) => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getBeijingDateString();
     
     apiStats = {
         totalCalls: 0,
@@ -241,12 +282,16 @@ app.post('/stats/reset-all', async (c) => {
     return c.json({ 
         success: true, 
         message: '所有统计数据已重置',
+        resetTime: "00:00",
         warning: '总调用次数也被重置了！'
     });
 });
 
+const isVercel = process.env.VERCEL || process.env.VERCEL_ENV || process.env.NEXT_PUBLIC_VERCEL_ENV;
+
 app.get('/', (c) => {
     const currentTime = new Date().toLocaleString('zh-CN', {
+        timeZone: 'Asia/Shanghai',
         year: 'numeric',
         month: 'long',
         day: 'numeric',
@@ -255,64 +300,82 @@ app.get('/', (c) => {
         minute: '2-digit',
         second: '2-digit',
         hour12: false
-    })
+    });
 
-    const runtime = get_runtime()
-    const baseUrl = get_url(c)
+    const runtime = get_runtime();
+    const baseUrl = get_url(c);
     
     checkAndResetDailyStats();
     
     const getApiUrl = () => {
-        const protocol = c.req.header('X-Forwarded-Proto') || 'https'
-        const host = c.req.header('Host') || new URL(c.req.url).host
-        let base = `${protocol}://${host}`
-        const currentPath = new URL(c.req.url).pathname
+        const protocol = c.req.header('X-Forwarded-Proto') || 'https';
+        const host = c.req.header('Host') || new URL(c.req.url).host;
+        let base = protocol + '://' + host;
+        const currentPath = new URL(c.req.url).pathname;
         
-        if (currentPath.startsWith('/meting')) {
-            return `${base}/api`
+        if (isVercel) {
+            return base + '/api';
         } else {
-            return `${base}/meting/api`
+            if (currentPath.startsWith('/meting')) {
+                return base + '/api';
+            } else {
+                return base + '/meting/api';
+            }
         }
-    }
+    };
     
-    const apiUrl = getApiUrl()
+    const apiUrl = getApiUrl();
     
     const getTestUrl = () => {
-        const protocol = c.req.header('X-Forwarded-Proto') || 'https'
-        const host = c.req.header('Host') || new URL(c.req.url).host
-        let base = `${protocol}://${host}`
-        const currentPath = new URL(c.req.url).pathname
+        const protocol = c.req.header('X-Forwarded-Proto') || 'https';
+        const host = c.req.header('Host') || new URL(c.req.url).host;
+        let base = protocol + '://' + host;
+        const currentPath = new URL(c.req.url).pathname;
         
-        if (currentPath.startsWith('/meting')) {
-            return `${base}/test`
+        if (isVercel) {
+            return base + '/test';
         } else {
-            return `${base}/meting/test`
+            if (currentPath.startsWith('/meting')) {
+                return base + '/test';
+            } else {
+                return base + '/meting/test';
+            }
         }
-    }
+    };
     
-    const testUrl = getTestUrl()
+    const testUrl = getTestUrl();
     
     const getCorrectBaseUrl = () => {
-        const protocol = c.req.header('X-Forwarded-Proto') || 'https'
-        const host = c.req.header('Host') || new URL(c.req.url).host
-        return `${protocol}://${host}`
-    }
+        const protocol = c.req.header('X-Forwarded-Proto') || 'https';
+        const host = c.req.header('Host') || new URL(c.req.url).host;
+        return protocol + '://' + host;
+    };
     
-    const correctBaseUrl = getCorrectBaseUrl()
+    const correctBaseUrl = getCorrectBaseUrl();
     
-    const today = new Date().toISOString().split('T')[0];
+    const today = getBeijingDateString();
     const totalCalls = apiStats.totalCalls;
     const todayCalls = apiStats.dailyCalls[today] || 0;
-    const lastUpdated = new Date(apiStats.lastUpdated).toLocaleString('zh-CN');
+    const lastUpdated = new Date(apiStats.lastUpdated).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
     const nextReset = getNextResetTime();
     
-    return c.html(`
-<!DOCTYPE html>
+    const html = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>初叶🍂Meting API</title>
+    <meta name="description" content="初叶Meting API服务 - 提供稳定可靠的音乐API接口">
+    
+    <link rel="icon" href="https://cloud.chuyel.top/f/PkZsP/tu%E5%B7%B2%E5%8E%BB%E5%BA%95.png" type="image/png">
+    <link rel="shortcut icon" href="https://cloud.chuyel.top/f/PkZsP/tu%E5%B7%B2%E5%8E%BB%E5%BA%95.png" type="image/png">
+    <link rel="apple-touch-icon" href="https://cloud.chuyel.top/f/PkZsP/tu%E5%B7%B2%E5%8E%BB%E5%BA%95.png">
+    
+    <link rel="icon" type="image/png" href="https://cloud.chuyel.top/f/PkZsP/tu%E5%B7%B2%E5%8E%BB%E5%BA%95.png">
+    <link rel="icon" href="https://cloud.chuyel.top/f/PkZsP/tu%E5%B7%B2%E5%8E%BB%E5%BA%95.png" sizes="any">
+    
+    <meta name="theme-color" content="#50B7FE">
+    
     <style>
         * {
             margin: 0;
@@ -321,7 +384,6 @@ app.get('/', (c) => {
             transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
         }
         
-        /* 深色主题变量 */
         :root {
             --bg-gradient: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), 
                           url('https://api.boxmoe.com/random.php?size=mw1024') no-repeat center center fixed;
@@ -334,19 +396,18 @@ app.get('/', (c) => {
             --text-muted: rgba(255, 255, 255, 0.8);
             --border-color: rgba(255, 255, 255, 0.2);
             --shadow-color: rgba(0, 0, 0, 0.3);
-            --accent-color: #3498db;
-            --accent-hover: #2980b9;
+            --accent-color: #50B7FE;
+            --accent-hover: #3a9fe8;
             --success-color: #2ecc71;
             --warning-color: #ff6b6b;
-            --btn-primary: linear-gradient(45deg, #3498db, #2980b9);
+            --btn-primary: linear-gradient(45deg, #50B7FE, #3a9fe8);
             --btn-success: linear-gradient(45deg, #2ecc71, #27ae60);
             --btn-purple: linear-gradient(45deg, #9b59b6, #8e44ad);
             --btn-orange: linear-gradient(45deg, #ff7e5f, #feb47b);
-            --stat-total: #3498db;
+            --stat-total: #50B7FE;
             --stat-today: #2ecc71;
         }
         
-        /* 浅色主题变量 */
         [data-theme="light"] {
             --bg-gradient: linear-gradient(rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.8)), 
                           url('https://api.boxmoe.com/random.php?size=mw1024') no-repeat center center fixed;
@@ -359,15 +420,15 @@ app.get('/', (c) => {
             --text-muted: #7f8c8d;
             --border-color: rgba(0, 0, 0, 0.1);
             --shadow-color: rgba(0, 0, 0, 0.15);
-            --accent-color: #3498db;
-            --accent-hover: #2980b9;
+            --accent-color: #50B7FE;
+            --accent-hover: #3a9fe8;
             --success-color: #2ecc71;
             --warning-color: #e74c3c;
-            --btn-primary: linear-gradient(45deg, #3498db, #2980b9);
+            --btn-primary: linear-gradient(45deg, #50B7FE, #3a9fe8);
             --btn-success: linear-gradient(45deg, #2ecc71, #27ae60);
             --btn-purple: linear-gradient(45deg, #9b59b6, #8e44ad);
             --btn-orange: linear-gradient(45deg, #ff7e5f, #feb47b);
-            --stat-total: #3498db;
+            --stat-total: #50B7FE;
             --stat-today: #2ecc71;
         }
         
@@ -392,7 +453,6 @@ app.get('/', (c) => {
             z-index: -1;
         }
         
-        /* 主题切换按钮 */
         .theme-toggle {
             position: fixed;
             top: 20px;
@@ -482,7 +542,7 @@ app.get('/', (c) => {
         
         .version-badge {
             display: inline-block;
-            background: var(--btn-orange);
+            background: #50B7FE;
             color: white;
             padding: 0.5rem 1rem;
             border-radius: 50px;
@@ -562,6 +622,7 @@ app.get('/', (c) => {
         
         .value a:hover {
             color: var(--accent-hover);
+            text-decoration: underline;
         }
         
         .status-badge {
@@ -644,7 +705,7 @@ app.get('/', (c) => {
         
         .btn:hover {
             transform: scale(1.05);
-            box-shadow: 0 6px 20px rgba(52, 152, 219, 0.4);
+            box-shadow: 0 6px 20px rgba(80, 183, 254, 0.4);
         }
         
         .btn-api {
@@ -734,7 +795,7 @@ app.get('/', (c) => {
         }
         
         .spinning {
-            animation: spin 0.5s linear;
+            animation: spin 2s linear infinite;
         }
         
         @media (max-width: 768px) {
@@ -779,7 +840,6 @@ app.get('/', (c) => {
     </style>
 </head>
 <body>
-    <!-- 主题切换按钮 -->
     <div class="theme-toggle" id="themeToggle" title="切换深色/浅色模式">
         <span class="theme-icon sun">🌞</span>
         <span class="theme-icon moon">🌙</span>
@@ -794,8 +854,8 @@ app.get('/', (c) => {
                      style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover; border: 4px solid var(--border-color); box-shadow: 0 8px 25px var(--shadow-color); background: var(--card-bg); padding: 3px; animation: float 3s ease-in-out infinite;">
             </div>
             <h1 style="font-size: 2.5rem; color: var(--text-primary); margin-bottom: 0.5rem; text-shadow: 0 2px 10px var(--shadow-color);">初叶🍂Meting API</h1>
-            <p style="font-size: 1.2rem; color: var(--text-secondary); margin-bottom: 1rem; text-shadow: 0 1px 5px var(--shadow-color);">初叶🍂Meting API-1.3.8</p>
-            <div style="display: inline-block; background: var(--btn-orange); color: white; padding: 0.5rem 1rem; border-radius: 50px; font-size: 0.9rem; font-weight: bold; margin-bottom: 1rem; box-shadow: 0 4px 15px var(--shadow-color);">版本 v1.3.8</div>
+            <p style="font-size: 1.2rem; color: var(--text-secondary); margin-bottom: 1rem; text-shadow: 0 1px 5px var(--shadow-color);">初叶🍂Meting API-1.4.0</p>
+            <div style="display: inline-block; background: #50B7FE; color: white; padding: 0.5rem 1rem; border-radius: 50px; font-size: 0.9rem; font-weight: bold; margin-bottom: 1rem; box-shadow: 0 4px 15px var(--shadow-color);">版本 v1.4.0</div>
         </header>
         
         <div class="info-grid">
@@ -827,6 +887,7 @@ app.get('/', (c) => {
                     <div class="label">API地址</div>
                     <div class="value">
                         <a href="${apiUrl}" style="color: var(--accent-color); text-decoration: none; word-break: break-all;">${apiUrl}</a>
+                        ${isVercel ? '<br><small style="color: var(--success-color);">(Vercel环境 - 已自动优化路径)</small>' : ''}
                     </div>
                 </div>
                 <div class="info-item">
@@ -857,11 +918,16 @@ app.get('/', (c) => {
                     <div class="label">API 状态</div>
                     <div class="value">
                         <span class="status-badge status-online">运行正常</span>
+                        ${isVercel ? '<span class="status-badge" style="background: linear-gradient(45deg, #000000, #484848); color: white; margin-left: 5px;">Vercel</span>' : ''}
                     </div>
                 </div>
                 <div class="info-item">
                     <div class="label">统计更新</div>
                     <div class="value">${lastUpdated}</div>
+                </div>
+                <div class="info-item">
+                    <div class="label">下次重置</div>
+                    <div class="value">${nextReset.time}</div>
                 </div>
                 <div class="info-item">
                     <div class="label">访问地址</div>
@@ -910,25 +976,24 @@ app.get('/', (c) => {
             <p>API调用统计：总 ${totalCalls.toLocaleString()} 次 | 今日 ${todayCalls.toLocaleString()} 次 | 下次重置：${nextReset.time}</p>
             <p>最后更新：${lastUpdated} | 如有问题，请查看文档或联系技术支持</p>
             <p style="margin-top: 10px; font-size: 0.8rem; color: var(--text-muted);">
-                当前主题：<span id="currentTheme">深色模式</span>
+                <span>主题：<span id="currentTheme">深色模式</span> | </span>
+                <span>部署环境：${isVercel ? 'Vercel' : '其他'} | </span>
+                <span>背景图片：<a href="https://api.boxmoe.com" target="_blank" style="color: var(--accent-color);">随机壁纸API</a></span>
             </p>
         </footer>
     </div>
     
     <script>
-        // 主题切换功能
         const themeToggle = document.getElementById('themeToggle');
         const themeText = document.getElementById('themeText');
         const currentThemeSpan = document.getElementById('currentTheme');
         const html = document.documentElement;
         
-        // 从localStorage获取保存的主题，或者根据系统偏好设置
         const savedTheme = localStorage.getItem('theme');
         const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
         
-        // 初始化主题
         function initTheme() {
-            let theme = 'dark'; // 默认深色
+            let theme = 'dark';
             
             if (savedTheme) {
                 theme = savedTheme;
@@ -941,62 +1006,42 @@ app.get('/', (c) => {
             applyTheme(theme);
         }
         
-        // 应用主题
         function applyTheme(theme) {
             html.setAttribute('data-theme', theme);
             
             if (theme === 'light') {
                 themeText.textContent = '浅色模式';
                 currentThemeSpan.textContent = '浅色模式';
+                themeToggle.querySelector('.theme-icon').classList.remove('spinning');
             } else {
                 themeText.textContent = '深色模式';
                 currentThemeSpan.textContent = '深色模式';
             }
             
-            // 保存到localStorage
             localStorage.setItem('theme', theme);
             
-            // 添加旋转动画
             const icon = themeToggle.querySelector('.theme-icon');
             icon.classList.add('spinning');
             setTimeout(() => {
                 icon.classList.remove('spinning');
-            }, 500);
-            
-            // 更新背景图片
-            updateBackgroundImage();
+            }, 600);
         }
         
-        // 切换主题
         function toggleTheme() {
             const currentTheme = html.getAttribute('data-theme') || 'dark';
             const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
             applyTheme(newTheme);
         }
         
-        // 更新背景图片
-        function updateBackgroundImage() {
-            const currentTheme = html.getAttribute('data-theme') || 'dark';
-            const bgOverlay = currentTheme === 'dark' 
-                ? 'linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5))' 
-                : 'linear-gradient(rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.8))';
-            
-            document.body.style.background = bgOverlay + ', url("https://api.boxmoe.com/random.php?size=mw1024") no-repeat center center fixed';
-            document.body.style.backgroundSize = 'cover';
-        }
-        
-        // 事件监听
         themeToggle.addEventListener('click', toggleTheme);
         
-        // 监听系统主题变化
         window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
-            if (!savedTheme) { // 如果用户没有手动选择主题
+            if (!savedTheme) {
                 const newTheme = e.matches ? 'dark' : 'light';
                 applyTheme(newTheme);
             }
         });
         
-        // 实时更新时间
         function updateTime() {
             const now = new Date();
             const options = {
@@ -1007,7 +1052,8 @@ app.get('/', (c) => {
                 hour: '2-digit',
                 minute: '2-digit',
                 second: '2-digit',
-                hour12: false
+                hour12: false,
+                timeZone: 'Asia/Shanghai'
             };
             const timeStr = now.toLocaleString('zh-CN', options);
             const timeElement = document.querySelector('.time-display');
@@ -1016,12 +1062,9 @@ app.get('/', (c) => {
             }
         }
         
-        // 每秒更新一次时间
         setInterval(updateTime, 1000);
         
-        // 添加简单的页面加载动画
         document.addEventListener('DOMContentLoaded', function() {
-            // 初始化主题
             initTheme();
             
             const cards = document.querySelectorAll('.info-card, .action-card');
@@ -1035,36 +1078,22 @@ app.get('/', (c) => {
                     card.style.transform = 'translateY(0)';
                 }, index * 100);
             });
-        });
-        
-        // 每5分钟检查一次是否需要重置（客户端辅助）
-        setInterval(() => {
-            const now = new Date();
-            const hours = now.getHours();
-            const minutes = now.getMinutes();
             
-            // 如果是00:00附近，刷新页面以获取最新统计
-            if (hours === 0 && minutes < 5) {
-                console.log('🕛 检测到00:00，刷新页面获取最新统计');
-                window.location.reload();
-            }
-        }, 300000);
-        
-        // 添加键盘快捷键 (Ctrl+Shift+T 切换主题)
-        document.addEventListener('keydown', function(e) {
-            if (e.ctrlKey && e.shiftKey && e.key === 'T') {
-                e.preventDefault();
-                toggleTheme();
-            }
+            updateTime();
         });
         
-        // 背景图片加载完成后的处理
         window.addEventListener('load', function() {
             const bgImage = new Image();
             bgImage.src = 'https://api.boxmoe.com/random.php?size=mw1024';
             bgImage.onload = function() {
                 console.log('🎨 背景图片加载完成');
-                updateBackgroundImage();
+                const currentTheme = html.getAttribute('data-theme') || 'dark';
+                const bgOverlay = currentTheme === 'dark' 
+                    ? 'linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5))' 
+                    : 'linear-gradient(rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.8))';
+                
+                document.body.style.background = bgOverlay + ', url("' + this.src + '") no-repeat center center fixed';
+                document.body.style.backgroundSize = 'cover';
             };
             bgImage.onerror = function() {
                 console.log('⚠️ 背景图片加载失败，使用备用背景');
@@ -1076,10 +1105,18 @@ app.get('/', (c) => {
                 }
             };
         });
+        
+        document.addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.shiftKey && e.key === 'T') {
+                e.preventDefault();
+                toggleTheme();
+            }
+        });
     </script>
 </body>
-</html>
-    `)
-})
+</html>`;
+    
+    return c.html(html);
+});
 
 export default app
