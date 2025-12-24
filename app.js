@@ -7,10 +7,12 @@ import config from './src/config.js'
 import { get_runtime, get_url } from './src/util.js'
 import fs from 'fs/promises'
 import { existsSync } from 'fs'
+import path from 'path'
 
 const app = new Hono()
 
 const STATS_FILE = './stats.json'
+const BACKUP_DIR = './backups'
 
 let apiStats = {
     totalCalls: 0,
@@ -18,6 +20,199 @@ let apiStats = {
     hourlyCalls: {},
     lastUpdated: new Date().toISOString(),
     lastResetDate: new Date().toISOString().split('T')[0]
+};
+
+let useMySQL = false;
+let dbPool = null;
+
+let mysql;
+try {
+    mysql = (await import('mysql2/promise')).default;
+    console.log('✅ MySQL2 模块加载成功');
+} catch (error) {
+    console.log('ℹ️  MySQL2 模块未安装，将使用本地文件存储');
+}
+
+let DB_CONFIG;
+try {
+    DB_CONFIG = (await import('./mysql.js')).default;
+    console.log('✅ 从mysql.js加载数据库配置');
+} catch (error) {
+    console.log('ℹ️  未找到mysql.js配置文件，使用环境变量配置');
+    DB_CONFIG = {
+        host: process.env.DB_HOST || 'localhost',
+        port: parseInt(process.env.DB_PORT) || 3306,
+        user: process.env.DB_USER || 'root',
+        password: process.env.DB_PASSWORD || '',
+        database: process.env.DB_NAME || 'api_stats',
+        waitForConnections: true,
+        connectionLimit: 10,
+        queueLimit: 0,
+        charset: 'utf8mb4'
+    };
+}
+
+const initMySQL = async () => {
+    if (!mysql) {
+        console.log('ℹ️  MySQL2模块不可用，使用本地文件存储');
+        return false;
+    }
+
+    const hasDBConfig = DB_CONFIG.host && DB_CONFIG.user && DB_CONFIG.database;
+    
+    if (!hasDBConfig || DB_CONFIG.host === 'localhost' && DB_CONFIG.user === 'root' && !DB_CONFIG.password) {
+        console.log('ℹ️  未配置数据库连接信息或使用默认配置，使用本地文件存储');
+        return false;
+    }
+
+    try {
+        console.log('🔗 尝试连接数据库...', {
+            host: DB_CONFIG.host,
+            port: DB_CONFIG.port,
+            database: DB_CONFIG.database,
+            user: DB_CONFIG.user
+        });
+        
+        dbPool = mysql.createPool(DB_CONFIG);
+        
+        const connection = await dbPool.getConnection();
+        console.log('✅ 数据库连接成功');
+        connection.release();
+
+        await initDatabaseTables();
+        
+        useMySQL = true;
+        console.log('💾 已启用数据库存储');
+        return true;
+    } catch (error) {
+        console.error('❌ 数据库连接失败:', error.message);
+        if (dbPool) {
+            await dbPool.end();
+            dbPool = null;
+        }
+        return false;
+    }
+};
+
+const initDatabaseTables = async () => {
+    if (!dbPool) return;
+
+    try {
+        await dbPool.execute(`
+            CREATE TABLE IF NOT EXISTS api_statistics (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                stat_key VARCHAR(100) UNIQUE NOT NULL,
+                stat_value JSON,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+
+        console.log('✅ 数据库表初始化完成');
+    } catch (error) {
+        console.error('❌ 数据库表初始化失败:', error);
+        throw error;
+    }
+};
+
+const loadStatsFromDB = async () => {
+    if (!dbPool) return;
+
+    try {
+        const [totalRows] = await dbPool.execute(
+            'SELECT stat_value FROM api_statistics WHERE stat_key = ?',
+            ['total_calls']
+        );
+        
+        if (totalRows.length > 0) {
+            const value = totalRows[0].stat_value;
+            apiStats.totalCalls = typeof value === 'string' ? JSON.parse(value).totalCalls || 0 : value.totalCalls || 0;
+        }
+
+        const [dailyRows] = await dbPool.execute(
+            'SELECT stat_value FROM api_statistics WHERE stat_key = ?',
+            ['daily_calls']
+        );
+        
+        if (dailyRows.length > 0) {
+            const value = dailyRows[0].stat_value;
+            apiStats.dailyCalls = typeof value === 'string' ? JSON.parse(value) : value;
+        }
+
+        const [hourlyRows] = await dbPool.execute(
+            'SELECT stat_value FROM api_statistics WHERE stat_key = ?',
+            ['hourly_calls']
+        );
+        
+        if (hourlyRows.length > 0) {
+            const value = hourlyRows[0].stat_value;
+            apiStats.hourlyCalls = typeof value === 'string' ? JSON.parse(value) : value;
+        }
+
+        const [metaRows] = await dbPool.execute(
+            'SELECT stat_value FROM api_statistics WHERE stat_key = ?',
+            ['metadata']
+        );
+        
+        if (metaRows.length > 0) {
+            const value = metaRows[0].stat_value;
+            const meta = typeof value === 'string' ? JSON.parse(value) : value;
+            apiStats.lastUpdated = meta.lastUpdated || new Date().toISOString();
+            apiStats.lastResetDate = meta.lastResetDate || getBeijingDateString();
+        }
+
+        console.log('✅ 从数据库加载统计数据成功');
+    } catch (error) {
+        console.error('❌ 从数据库加载统计数据失败:', error);
+    }
+};
+
+const saveStatsToDB = async () => {
+    if (!dbPool) return;
+
+    try {
+        const now = new Date().toISOString();
+        
+        await dbPool.execute(
+            `INSERT INTO api_statistics (stat_key, stat_value) 
+             VALUES (?, ?) 
+             ON DUPLICATE KEY UPDATE stat_value = ?, updated_at = CURRENT_TIMESTAMP`,
+            ['total_calls', JSON.stringify({ totalCalls: apiStats.totalCalls }), 
+             JSON.stringify({ totalCalls: apiStats.totalCalls })]
+        );
+
+        await dbPool.execute(
+            `INSERT INTO api_statistics (stat_key, stat_value) 
+             VALUES (?, ?) 
+             ON DUPLICATE KEY UPDATE stat_value = ?, updated_at = CURRENT_TIMESTAMP`,
+            ['daily_calls', JSON.stringify(apiStats.dailyCalls), 
+             JSON.stringify(apiStats.dailyCalls)]
+        );
+
+        await dbPool.execute(
+            `INSERT INTO api_statistics (stat_key, stat_value) 
+             VALUES (?, ?) 
+             ON DUPLICATE KEY UPDATE stat_value = ?, updated_at = CURRENT_TIMESTAMP`,
+            ['hourly_calls', JSON.stringify(apiStats.hourlyCalls), 
+             JSON.stringify(apiStats.hourlyCalls)]
+        );
+
+        const metadata = {
+            lastUpdated: now,
+            lastResetDate: apiStats.lastResetDate
+        };
+        
+        await dbPool.execute(
+            `INSERT INTO api_statistics (stat_key, stat_value) 
+             VALUES (?, ?) 
+             ON DUPLICATE KEY UPDATE stat_value = ?, updated_at = CURRENT_TIMESTAMP`,
+            ['metadata', JSON.stringify(metadata), JSON.stringify(metadata)]
+        );
+
+        console.log('💾 统计数据已保存到数据库');
+    } catch (error) {
+        console.error('❌ 保存统计数据到数据库失败:', error);
+    }
 };
 
 const getBeijingDate = () => {
@@ -36,8 +231,99 @@ const getBeijingHour = () => {
     return beijingDate.getUTCHours();
 };
 
-const checkAndResetDailyStats = () => {
-    const beijingDate = getBeijingDate();
+const cleanupOldBackups = async () => {
+    try {
+        if (!existsSync(BACKUP_DIR)) {
+            return;
+        }
+
+        const files = await fs.readdir(BACKUP_DIR);
+        const backupFiles = files.filter(file => file.startsWith('stats-backup-') && file.endsWith('.json'));
+        
+        if (backupFiles.length <= 3) {
+            return;
+        }
+
+        const filesWithStats = await Promise.all(
+            backupFiles.map(async file => {
+                const filePath = path.join(BACKUP_DIR, file);
+                const stats = await fs.stat(filePath);
+                return { file, mtime: stats.mtime.getTime() };
+            })
+        );
+
+        filesWithStats.sort((a, b) => a.mtime - b.mtime);
+
+        const filesToDelete = filesWithStats.slice(0, filesWithStats.length - 3);
+        
+        for (const fileInfo of filesToDelete) {
+            const filePath = path.join(BACKUP_DIR, fileInfo.file);
+            await fs.unlink(filePath);
+            console.log(`🗑️  删除旧备份文件: ${fileInfo.file}`);
+        }
+    } catch (error) {
+        console.error('❌ 清理旧备份失败:', error);
+    }
+};
+
+const createBackup = async () => {
+    try {
+        if (!existsSync(BACKUP_DIR)) {
+            await fs.mkdir(BACKUP_DIR, { recursive: true });
+        }
+
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const backupFile = path.join(BACKUP_DIR, `stats-backup-${timestamp}.json`);
+        
+        await fs.writeFile(backupFile, JSON.stringify(apiStats, null, 2), 'utf8');
+        console.log(`📦 创建备份文件: ${backupFile}`);
+        
+        await cleanupOldBackups();
+        
+        return backupFile;
+    } catch (error) {
+        console.error('❌ 创建备份失败:', error);
+        return null;
+    }
+};
+
+const migrateFromFileToDB = async () => {
+    if (!dbPool || !existsSync(STATS_FILE)) return;
+
+    try {
+        console.log('🔄 开始从本地文件迁移数据到数据库...');
+        
+        const data = await fs.readFile(STATS_FILE, 'utf8');
+        const fileStats = JSON.parse(data);
+        
+        apiStats.totalCalls = Math.max(apiStats.totalCalls, fileStats.totalCalls || 0);
+        
+        Object.keys(fileStats.dailyCalls || {}).forEach(date => {
+            const fileCount = fileStats.dailyCalls[date] || 0;
+            const dbCount = apiStats.dailyCalls[date] || 0;
+            apiStats.dailyCalls[date] = Math.max(fileCount, dbCount);
+        });
+
+        Object.keys(fileStats.hourlyCalls || {}).forEach(key => {
+            const fileCount = fileStats.hourlyCalls[key] || 0;
+            const dbCount = apiStats.hourlyCalls[key] || 0;
+            apiStats.hourlyCalls[key] = Math.max(fileCount, dbCount);
+        });
+
+        await saveStatsToDB();
+        
+        const backupFile = await createBackup();
+        if (backupFile) {
+            await fs.copyFile(STATS_FILE, backupFile + '.original');
+        }
+        
+        console.log('✅ 数据迁移完成');
+    } catch (error) {
+        console.error('❌ 数据迁移失败:', error);
+    }
+};
+
+const checkAndResetDailyStats = async () => {
     const today = getBeijingDateString();
     const hour = getBeijingHour();
     
@@ -47,11 +333,12 @@ const checkAndResetDailyStats = () => {
     if (today !== apiStats.lastResetDate) {
         console.log(`🔄 日期已变化！重置今日统计：${apiStats.lastResetDate} -> ${today}`);
         
-        apiStats.lastResetDate = today;
+        await createBackup();
         
+        apiStats.lastResetDate = today;
         apiStats.dailyCalls[today] = 0;
         
-        const thirtyDaysAgo = new Date(beijingDate);
+        const thirtyDaysAgo = getBeijingDate();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
         const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
         
@@ -61,7 +348,7 @@ const checkAndResetDailyStats = () => {
             }
         });
         
-        const twoDaysAgo = new Date(beijingDate);
+        const twoDaysAgo = getBeijingDate();
         twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
         const twoDaysAgoStr = twoDaysAgo.toISOString().split('T')[0];
         
@@ -74,11 +361,7 @@ const checkAndResetDailyStats = () => {
         
         console.log(`✅ 今日统计已重置为: ${apiStats.dailyCalls[today]}`);
         
-        saveStats().then(() => {
-            console.log('💾 日期变化已保存');
-        }).catch(err => {
-            console.error('❌ 保存日期变化失败:', err);
-        });
+        await saveStats();
         
         return true;
     }
@@ -88,7 +371,15 @@ const checkAndResetDailyStats = () => {
 
 const loadStats = async () => {
     try {
-        if (existsSync(STATS_FILE)) {
+        const mysqlEnabled = await initMySQL();
+        
+        if (mysqlEnabled) {
+            await loadStatsFromDB();
+            
+            if (existsSync(STATS_FILE)) {
+                await migrateFromFileToDB();
+            }
+        } else if (existsSync(STATS_FILE)) {
             const data = await fs.readFile(STATS_FILE, 'utf8')
             const savedStats = JSON.parse(data)
             
@@ -101,24 +392,39 @@ const loadStats = async () => {
             console.log('✅ 统计数据加载成功')
             console.log(`📊 当前统计：总调用=${apiStats.totalCalls}, 上次重置=${apiStats.lastResetDate}`)
             
-            const resetHappened = checkAndResetDailyStats();
+            const resetHappened = await checkAndResetDailyStats();
             if (resetHappened) {
                 console.log('🔄 启动时检测到日期变化，今日统计已重置');
             }
+        } else {
+            console.log('📝 创建新的统计文件')
+            await saveStats()
         }
+        
+        await cleanupOldBackups();
     } catch (error) {
-        console.log('📝 创建新的统计文件')
-        await saveStats()
+        console.error('❌ 加载统计数据失败:', error);
+        console.log('📝 创建新的统计文件');
+        await saveStats();
     }
 }
 
 const saveStats = async () => {
     try {
-        apiStats.lastUpdated = new Date().toISOString()
-        await fs.writeFile(STATS_FILE, JSON.stringify(apiStats, null, 2), 'utf8')
-        console.log('💾 统计数据已保存')
+        apiStats.lastUpdated = new Date().toISOString();
+        
+        if (useMySQL && dbPool) {
+            await saveStatsToDB();
+        } else {
+            await fs.writeFile(STATS_FILE, JSON.stringify(apiStats, null, 2), 'utf8');
+            console.log('💾 统计数据已保存');
+            
+            if (apiStats.totalCalls % 100 === 0) {
+                await createBackup();
+            }
+        }
     } catch (error) {
-        console.error('❌ 保存统计数据失败:', error)
+        console.error('❌ 保存统计数据失败:', error);
     }
 }
 
@@ -128,7 +434,7 @@ const updateStats = async () => {
     
     console.log(`📝 更新统计: 日期=${today}, 小时=${hour}`);
     
-    checkAndResetDailyStats();
+    await checkAndResetDailyStats();
     
     apiStats.totalCalls++;
     console.log(`📈 总调用次数增加: ${apiStats.totalCalls}`);
@@ -167,9 +473,6 @@ const updateStats = async () => {
 
 const getTodayCalls = () => {
     const today = getBeijingDateString();
-    
-    checkAndResetDailyStats();
-    
     return apiStats.dailyCalls[today] || 0;
 };
 
@@ -215,7 +518,7 @@ app.use('/api', async (c, next) => {
 });
 
 app.use('*', async (c, next) => {
-    checkAndResetDailyStats();
+    await checkAndResetDailyStats();
     await next();
 });
 
@@ -226,10 +529,10 @@ app.get('/test', handler)
 
 app.get('/stats', (c) => {
     const today = getBeijingDateString();
-    const todayCalls = apiStats.dailyCalls[today] || 0;
+    const todayCalls = getTodayCalls();
     const nextReset = getNextResetTime();
     
-    checkAndResetDailyStats();
+    const storageType = useMySQL ? '数据库' : '本地文件';
     
     return c.json({
         success: true,
@@ -242,6 +545,7 @@ app.get('/stats', (c) => {
             lastResetDate: apiStats.lastResetDate,
             nextReset: nextReset.time,
             timeToReset: nextReset.formatted,
+            storageType: storageType,
             resetInfo: "总调用次数永不重置，今日调用每天00:00自动重置",
             resetTime: "00:00",
             serverTime: new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }),
@@ -252,6 +556,8 @@ app.get('/stats', (c) => {
 
 app.post('/stats/reset-today', async (c) => {
     const today = getBeijingDateString();
+    
+    await createBackup();
     
     apiStats.dailyCalls[today] = 0;
     apiStats.lastResetDate = today;
@@ -270,6 +576,8 @@ app.post('/stats/reset-today', async (c) => {
 app.post('/stats/reset-all', async (c) => {
     const today = getBeijingDateString();
     
+    await createBackup();
+    
     apiStats = {
         totalCalls: 0,
         dailyCalls: {},
@@ -286,6 +594,133 @@ app.post('/stats/reset-all', async (c) => {
         warning: '总调用次数也被重置了！'
     });
 });
+
+app.get('/stats/storage-info', (c) => {
+    return c.json({
+        success: true,
+        data: {
+            storageType: useMySQL ? '数据库' : '本地文件',
+            mysqlEnabled: useMySQL,
+            mysqlConnected: dbPool !== null,
+            localFileExists: existsSync(STATS_FILE),
+            configAvailable: !!mysql
+        }
+    });
+});
+
+app.post('/stats/migrate-to-db', async (c) => {
+    if (!dbPool) {
+        return c.json({
+            success: false,
+            message: '数据库未连接，无法迁移数据'
+        }, 400);
+    }
+    
+    try {
+        await migrateFromFileToDB();
+        return c.json({
+            success: true,
+            message: '数据迁移完成',
+            storageType: '数据库'
+        });
+    } catch (error) {
+        return c.json({
+            success: false,
+            message: '数据迁移失败: ' + error.message
+        }, 500);
+    }
+});
+
+app.get('/stats/backups', async (c) => {
+    try {
+        if (!existsSync(BACKUP_DIR)) {
+            await fs.mkdir(BACKUP_DIR, { recursive: true });
+        }
+
+        const files = await fs.readdir(BACKUP_DIR);
+        const backupFiles = files.filter(file => file.startsWith('stats-backup-') && file.endsWith('.json'));
+        
+        const backupList = await Promise.all(
+            backupFiles.map(async (file) => {
+                const filePath = path.join(BACKUP_DIR, file);
+                const stats = await fs.stat(filePath);
+                return {
+                    filename: file,
+                    size: stats.size,
+                    created: stats.mtime.toISOString(),
+                    createdFormatted: stats.mtime.toLocaleString('zh-CN', { 
+                        timeZone: 'Asia/Shanghai',
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        hour12: false
+                    })
+                };
+            })
+        );
+
+        backupList.sort((a, b) => new Date(b.created) - new Date(a.created));
+
+        return c.json({
+            success: true,
+            data: {
+                backupDir: BACKUP_DIR,
+                totalBackups: backupList.length,
+                maxBackups: 3,
+                backups: backupList
+            }
+        });
+    } catch (error) {
+        return c.json({
+            success: false,
+            message: '获取备份列表失败: ' + error.message
+        }, 500);
+    }
+});
+
+app.post('/stats/create-backup', async (c) => {
+    try {
+        const backupFile = await createBackup();
+        
+        if (backupFile) {
+            return c.json({
+                success: true,
+                message: '备份创建成功',
+                backupFile: path.basename(backupFile),
+                totalBackups: await getBackupCount(),
+                maxBackups: 3
+            });
+        } else {
+            return c.json({
+                success: false,
+                message: '备份创建失败'
+            }, 500);
+        }
+    } catch (error) {
+        return c.json({
+            success: false,
+            message: '创建备份失败: ' + error.message
+        }, 500);
+    }
+});
+
+const getBackupCount = async () => {
+    try {
+        if (!existsSync(BACKUP_DIR)) {
+            return 0;
+        }
+        
+        const files = await fs.readdir(BACKUP_DIR);
+        const backupFiles = files.filter(file => file.startsWith('stats-backup-') && file.endsWith('.json'));
+        return backupFiles.length;
+    } catch (error) {
+        console.error('❌ 获取备份数量失败:', error);
+        return 0;
+    }
+};
 
 const isVercel = process.env.VERCEL || process.env.VERCEL_ENV || process.env.NEXT_PUBLIC_VERCEL_ENV;
 
@@ -304,8 +739,6 @@ app.get('/', (c) => {
 
     const runtime = get_runtime();
     const baseUrl = get_url(c);
-    
-    checkAndResetDailyStats();
     
     const getApiUrl = () => {
         const protocol = c.req.header('X-Forwarded-Proto') || 'https';
@@ -355,9 +788,12 @@ app.get('/', (c) => {
     
     const today = getBeijingDateString();
     const totalCalls = apiStats.totalCalls;
-    const todayCalls = apiStats.dailyCalls[today] || 0;
+    const todayCalls = getTodayCalls();
     const lastUpdated = new Date(apiStats.lastUpdated).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
     const nextReset = getNextResetTime();
+    
+    const storageType = useMySQL ? '数据库' : '本地文件';
+    const storageIcon = useMySQL ? '💾' : '📁';
     
     const html = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -854,8 +1290,8 @@ app.get('/', (c) => {
                      style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover; border: 4px solid var(--border-color); box-shadow: 0 8px 25px var(--shadow-color); background: var(--card-bg); padding: 3px; animation: float 3s ease-in-out infinite;">
             </div>
             <h1 style="font-size: 2.5rem; color: var(--text-primary); margin-bottom: 0.5rem; text-shadow: 0 2px 10px var(--shadow-color);">初叶🍂Meting API</h1>
-            <p style="font-size: 1.2rem; color: var(--text-secondary); margin-bottom: 1rem; text-shadow: 0 1px 5px var(--shadow-color);">初叶🍂Meting API-1.4.0</p>
-            <div style="display: inline-block; background: #50B7FE; color: white; padding: 0.5rem 1rem; border-radius: 50px; font-size: 0.9rem; font-weight: bold; margin-bottom: 1rem; box-shadow: 0 4px 15px var(--shadow-color);">版本 v1.4.0</div>
+            <p style="font-size: 1.2rem; color: var(--text-secondary); margin-bottom: 1rem; text-shadow: 0 1px 5px var(--shadow-color);">初叶🍂Meting API-1.4.2</p>
+            <div style="display: inline-block; background: #50B7FE; color: white; padding: 0.5rem 1rem; border-radius: 50px; font-size: 0.9rem; font-weight: bold; margin-bottom: 1rem; box-shadow: 0 4px 15px var(--shadow-color);">版本 v1.4.2</div>
         </header>
         
         <div class="info-grid">
@@ -869,6 +1305,10 @@ app.get('/', (c) => {
                             ${runtime.includes('Node') ? '生产环境' : '开发环境'}
                         </span>
                     </div>
+                </div>
+                <div class="info-item">
+                    <div class="label">存储方式</div>
+                    <div class="value">${storageIcon} ${storageType}</div>
                 </div>
                 <div class="info-item">
                     <div class="label">服务端口</div>
@@ -1117,6 +1557,22 @@ app.get('/', (c) => {
 </html>`;
     
     return c.html(html);
+});
+
+process.on('SIGINT', async () => {
+    if (dbPool) {
+        await dbPool.end();
+        console.log('🔒 数据库连接已关闭');
+    }
+    process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+    if (dbPool) {
+        await dbPool.end();
+        console.log('🔒 数据库连接已关闭');
+    }
+    process.exit(0);
 });
 
 export default app
