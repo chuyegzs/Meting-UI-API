@@ -32,5 +32,5 @@ Vercel:
 运行之前先修改/src/providers/你的所属账号（网易云，QQ......）（netease为网易云，tencent为QQ音乐，请看上面的使用教程修改）
 
 有时间我再写完，我是懒人，不知道啥时候会更新，目前还在更新中
-<img width="1672" height="1002" alt="9ab2d69381576467e8f6348eed8870c3" src="https://github.com/user-attachments/assets/ec5b1ca6-20d6-4634-b4bb-87786177d3a6" />
+<img width="1672" height="1002" alt="9ab2d69381576467e8f6348eed8870c3" src="https://cloud.chuyel.top/f/qx9kFl/05f5930cd2175434f52a66354d494c5c.png" />
 交流群：1048889481（记得点Star）
