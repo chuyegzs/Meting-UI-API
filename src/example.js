@@ -7,7 +7,7 @@ export default {
         "url": { "show": false, "value": "002Rnpvi058Qdm" },
     },
     "netease": {
-        "playlist": { "show": true, "value": "6907557348" },
+        "playlist": { "show": true, "value": "17584514086" },
         "song": { "show": true, "value": "473403185" },
         "artist": { "show": true, "value": "12441107" },
         "lrc": { "show": false, "value": "2015217630" },
