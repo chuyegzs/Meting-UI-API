@@ -4,7 +4,7 @@
 该项目修改自xizeyoupan作者的MetingAPI，我不是原作者，我只是拿他的修改！！！关于此项目的问题找我，不要骚扰原作者！！！！！
 不支持Docker安装
 
-Vercel:
+Vercel（目前测试无法登录QQ音乐账号）:
 
 1.先Fork仓库到自己Github账户
 
