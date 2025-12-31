@@ -18,8 +18,12 @@ let apiStats = {
     totalCalls: 0,
     dailyCalls: {},
     hourlyCalls: {},
+    weeklyCalls: {},
+    monthlyCalls: {},
     lastUpdated: new Date().toISOString(),
-    lastResetDate: new Date().toISOString().split('T')[0]
+    lastResetDate: new Date().toISOString().split('T')[0],
+    lastWeeklyReset: new Date().toISOString().split('T')[0],
+    lastMonthlyReset: new Date().toISOString().split('T')[0].slice(0, 7)
 };
 
 let useMySQL = false;
@@ -52,6 +56,8 @@ try {
     };
 }
 
+const isVercel = process.env.VERCEL || process.env.VERCEL_ENV || process.env.NEXT_PUBLIC_VERCEL_ENV;
+
 const getBeijingDate = () => {
     const now = new Date();
     return new Date(now.getTime() + 8 * 60 * 60 * 1000);
@@ -63,6 +69,28 @@ const getBeijingDateString = () => {
 
 const getBeijingHour = () => {
     return getBeijingDate().getUTCHours();
+};
+
+const getWeekNumber = (date) => {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+};
+
+const getWeekKey = () => {
+    const beijingDate = getBeijingDate();
+    const year = beijingDate.getFullYear();
+    const week = getWeekNumber(beijingDate);
+    return `${year}-W${week.toString().padStart(2, '0')}`;
+};
+
+const getMonthKey = () => {
+    const beijingDate = getBeijingDate();
+    const year = beijingDate.getFullYear();
+    const month = beijingDate.getMonth() + 1;
+    return `${year}-${month.toString().padStart(2, '0')}`;
 };
 
 const cleanupOldBackups = async () => {
@@ -175,6 +203,23 @@ const initDatabaseTables = async () => {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         `);
+        
+        await dbPool.execute(`
+            CREATE TABLE IF NOT EXISTS api_logs (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                endpoint VARCHAR(255) NOT NULL,
+                method VARCHAR(10) NOT NULL,
+                status_code INT NOT NULL,
+                response_time_ms INT NOT NULL,
+                ip_address VARCHAR(45),
+                user_agent TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_endpoint (endpoint),
+                INDEX idx_created_at (created_at),
+                INDEX idx_status_code (status_code)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+        
         console.log('✅ 数据库表初始化完成');
     } catch (error) {
         console.error('❌ 数据库表初始化失败:', error);
@@ -199,6 +244,14 @@ const dbOperations = {
                 'SELECT stat_value FROM api_statistics WHERE stat_key = ?',
                 ['hourly_calls']
             );
+            const [weeklyRows] = await dbPool.execute(
+                'SELECT stat_value FROM api_statistics WHERE stat_key = ?',
+                ['weekly_calls']
+            );
+            const [monthlyRows] = await dbPool.execute(
+                'SELECT stat_value FROM api_statistics WHERE stat_key = ?',
+                ['monthly_calls']
+            );
             const [metaRows] = await dbPool.execute(
                 'SELECT stat_value FROM api_statistics WHERE stat_key = ?',
                 ['metadata']
@@ -207,14 +260,20 @@ const dbOperations = {
             const total = totalRows[0]?.stat_value;
             const daily = dailyRows[0]?.stat_value;
             const hourly = hourlyRows[0]?.stat_value;
+            const weekly = weeklyRows[0]?.stat_value;
+            const monthly = monthlyRows[0]?.stat_value;
             const meta = metaRows[0]?.stat_value;
 
             return {
                 totalCalls: total ? (typeof total === 'string' ? JSON.parse(total).totalCalls : total.totalCalls) || 0 : 0,
                 dailyCalls: daily ? (typeof daily === 'string' ? JSON.parse(daily) : daily) : {},
                 hourlyCalls: hourly ? (typeof hourly === 'string' ? JSON.parse(hourly) : hourly) : {},
+                weeklyCalls: weekly ? (typeof weekly === 'string' ? JSON.parse(weekly) : weekly) : {},
+                monthlyCalls: monthly ? (typeof monthly === 'string' ? JSON.parse(monthly) : monthly) : {},
                 lastUpdated: meta ? (typeof meta === 'string' ? JSON.parse(meta).lastUpdated : meta.lastUpdated) || new Date().toISOString() : new Date().toISOString(),
-                lastResetDate: meta ? (typeof meta === 'string' ? JSON.parse(meta).lastResetDate : meta.lastResetDate) || getBeijingDateString() : getBeijingDateString()
+                lastResetDate: meta ? (typeof meta === 'string' ? JSON.parse(meta).lastResetDate : meta.lastResetDate) || getBeijingDateString() : getBeijingDateString(),
+                lastWeeklyReset: meta ? (typeof meta === 'string' ? JSON.parse(meta).lastWeeklyReset : meta.lastWeeklyReset) || getBeijingDateString() : getBeijingDateString(),
+                lastMonthlyReset: meta ? (typeof meta === 'string' ? JSON.parse(meta).lastMonthlyReset : meta.lastMonthlyReset) || getBeijingDateString().slice(0, 7) : getBeijingDateString().slice(0, 7)
             };
         } catch (error) {
             console.error('❌ 从数据库加载统计数据失败:', error);
@@ -229,13 +288,17 @@ const dbOperations = {
             const now = new Date().toISOString();
             const metadata = {
                 lastUpdated: now,
-                lastResetDate: apiStats.lastResetDate
+                lastResetDate: apiStats.lastResetDate,
+                lastWeeklyReset: apiStats.lastWeeklyReset,
+                lastMonthlyReset: apiStats.lastMonthlyReset
             };
 
             const queries = [
                 ['total_calls', JSON.stringify({ totalCalls: apiStats.totalCalls })],
                 ['daily_calls', JSON.stringify(apiStats.dailyCalls)],
                 ['hourly_calls', JSON.stringify(apiStats.hourlyCalls)],
+                ['weekly_calls', JSON.stringify(apiStats.weeklyCalls)],
+                ['monthly_calls', JSON.stringify(apiStats.monthlyCalls)],
                 ['metadata', JSON.stringify(metadata)]
             ];
 
@@ -254,6 +317,51 @@ const dbOperations = {
             console.error('❌ 保存统计数据到数据库失败:', error);
             return false;
         }
+    },
+
+    logApiRequest: async (endpoint, method, statusCode, responseTime, ip, userAgent) => {
+        if (!dbPool) return;
+        
+        try {
+            await dbPool.execute(
+                'INSERT INTO api_logs (endpoint, method, status_code, response_time_ms, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?)',
+                [endpoint, method, statusCode, responseTime, ip, userAgent]
+            );
+        } catch (error) {
+            console.error('❌ 记录API日志失败:', error);
+        }
+    },
+
+    getAnalytics: async () => {
+        if (!dbPool) return null;
+        
+        try {
+            const [topEndpoints] = await dbPool.execute(
+                'SELECT endpoint, COUNT(*) as count FROM api_logs GROUP BY endpoint ORDER BY count DESC LIMIT 10'
+            );
+            
+            const [statusCodes] = await dbPool.execute(
+                'SELECT status_code, COUNT(*) as count FROM api_logs GROUP BY status_code ORDER BY count DESC'
+            );
+            
+            const [responseTimes] = await dbPool.execute(
+                'SELECT AVG(response_time_ms) as avg_time, MIN(response_time_ms) as min_time, MAX(response_time_ms) as max_time FROM api_logs WHERE created_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)'
+            );
+            
+            const [hourlyActivity] = await dbPool.execute(
+                'SELECT HOUR(created_at) as hour, COUNT(*) as count FROM api_logs WHERE created_at >= DATE_SUB(NOW(), INTERVAL 1 DAY) GROUP BY HOUR(created_at) ORDER BY hour'
+            );
+            
+            return {
+                topEndpoints,
+                statusCodes,
+                responseTimes: responseTimes[0] || {},
+                hourlyActivity
+            };
+        } catch (error) {
+            console.error('❌ 获取分析数据失败:', error);
+            return null;
+        }
     }
 };
 
@@ -268,8 +376,12 @@ const fileOperations = {
                 totalCalls: savedStats.totalCalls || 0,
                 dailyCalls: savedStats.dailyCalls || {},
                 hourlyCalls: savedStats.hourlyCalls || {},
+                weeklyCalls: savedStats.weeklyCalls || {},
+                monthlyCalls: savedStats.monthlyCalls || {},
                 lastUpdated: savedStats.lastUpdated || new Date().toISOString(),
-                lastResetDate: savedStats.lastResetDate || getBeijingDateString()
+                lastResetDate: savedStats.lastResetDate || getBeijingDateString(),
+                lastWeeklyReset: savedStats.lastWeeklyReset || getBeijingDateString(),
+                lastMonthlyReset: savedStats.lastMonthlyReset || getBeijingDateString().slice(0, 7)
             };
         } catch (error) {
             console.error('❌ 从本地文件加载统计数据失败:', error);
@@ -311,7 +423,20 @@ const migrateFromFileToDB = async () => {
                 apiStats.hourlyCalls[key] = Math.max(fileCount, dbCount);
             });
 
+            Object.keys(fileData.weeklyCalls || {}).forEach(key => {
+                const fileCount = fileData.weeklyCalls[key] || 0;
+                const dbCount = apiStats.weeklyCalls[key] || 0;
+                apiStats.weeklyCalls[key] = Math.max(fileCount, dbCount);
+            });
+
+            Object.keys(fileData.monthlyCalls || {}).forEach(key => {
+                const fileCount = fileData.monthlyCalls[key] || 0;
+                const dbCount = apiStats.monthlyCalls[key] || 0;
+                apiStats.monthlyCalls[key] = Math.max(fileCount, dbCount);
+            });
+
             await dbOperations.saveStats();
+            
             console.log('✅ 数据迁移完成');
         }
     } catch (error) {
@@ -322,30 +447,52 @@ const migrateFromFileToDB = async () => {
 const cleanupOldData = () => {
     const today = getBeijingDateString();
     
-    const thirtyDaysAgo = getBeijingDate();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
+    const ninetyDaysAgo = getBeijingDate();
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+    const ninetyDaysAgoStr = ninetyDaysAgo.toISOString().split('T')[0];
     
     Object.keys(apiStats.dailyCalls).forEach(date => {
-        if (date < thirtyDaysAgoStr) {
+        if (date < ninetyDaysAgoStr) {
             delete apiStats.dailyCalls[date];
         }
     });
     
-    const twoDaysAgo = getBeijingDate();
-    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
-    const twoDaysAgoStr = twoDaysAgo.toISOString().split('T')[0];
+    const sevenDaysAgo = getBeijingDate();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const sevenDaysAgoStr = sevenDaysAgo.toISOString().split('T')[0];
     
     Object.keys(apiStats.hourlyCalls).forEach(key => {
         const date = key.split('-')[0];
-        if (date < twoDaysAgoStr) {
+        if (date < sevenDaysAgoStr) {
             delete apiStats.hourlyCalls[key];
+        }
+    });
+    
+    const currentYear = new Date().getFullYear();
+    Object.keys(apiStats.weeklyCalls).forEach(weekKey => {
+        const year = parseInt(weekKey.split('-')[0]);
+        if (year < currentYear - 1) {
+            delete apiStats.weeklyCalls[weekKey];
+        }
+    });
+    
+    Object.keys(apiStats.monthlyCalls).forEach(monthKey => {
+        const year = parseInt(monthKey.split('-')[0]);
+        if (year < currentYear - 2) {
+            delete apiStats.monthlyCalls[monthKey];
         }
     });
 };
 
-const checkAndResetDailyStats = async () => {
+const checkAndResetStats = async () => {
     const today = getBeijingDateString();
+    const weekKey = getWeekKey();
+    const monthKey = getMonthKey();
+    
+    console.log(`🔍 检查重置: 日期=${today}, 周=${weekKey}, 月=${monthKey}`);
+    console.log(`📊 上次重置: 日=${apiStats.lastResetDate}, 周=${apiStats.lastWeeklyReset}, 月=${apiStats.lastMonthlyReset}`);
+    
+    let resetHappened = false;
     
     if (today !== apiStats.lastResetDate) {
         console.log(`🔄 日期已变化！重置今日统计：${apiStats.lastResetDate} -> ${today}`);
@@ -355,21 +502,41 @@ const checkAndResetDailyStats = async () => {
         apiStats.lastResetDate = today;
         apiStats.dailyCalls[today] = 0;
         
-        cleanupOldData();
-        
-        console.log(`✅ 今日统计已重置为: ${apiStats.dailyCalls[today]}`);
-        await saveStats();
-        return true;
+        resetHappened = true;
     }
     
-    return false;
+    const currentWeekStart = getWeekKey();
+    if (currentWeekStart !== apiStats.lastWeeklyReset) {
+        console.log(`🔄 周已变化！重置本周统计：${apiStats.lastWeeklyReset} -> ${currentWeekStart}`);
+        
+        apiStats.lastWeeklyReset = currentWeekStart;
+        apiStats.weeklyCalls[currentWeekStart] = 0;
+        
+        resetHappened = true;
+    }
+    
+    const currentMonth = getMonthKey();
+    if (currentMonth !== apiStats.lastMonthlyReset) {
+        console.log(`🔄 月已变化！重置本月统计：${apiStats.lastMonthlyReset} -> ${currentMonth}`);
+        
+        apiStats.lastMonthlyReset = currentMonth;
+        apiStats.monthlyCalls[currentMonth] = 0;
+        
+        resetHappened = true;
+    }
+    
+    if (resetHappened) {
+        cleanupOldData();
+        await saveStats();
+        console.log('✅ 统计重置完成');
+    }
+    
+    return resetHappened;
 };
 
 const loadStats = async () => {
     try {
-        const isVercel = process.env.VERCEL || process.env.VERCEL_ENV || process.env.NEXT_PUBLIC_VERCEL_ENV;
         if (isVercel) {
-            console.log('🌐 Vercel环境：统计数据仅在内存中（重启丢失）');
             console.log(`📊 当前统计：总调用=${apiStats.totalCalls}, 上次重置=${apiStats.lastResetDate}`);
             return;
         }
@@ -394,11 +561,11 @@ const loadStats = async () => {
             }
         }
         
-        console.log(`📊 当前统计：总调用=${apiStats.totalCalls}, 上次重置=${apiStats.lastResetDate}`);
+        console.log(`📊 当前统计：总调用=${apiStats.totalCalls}, 今日=${apiStats.dailyCalls[getBeijingDateString()] || 0}`);
         
-        const resetHappened = await checkAndResetDailyStats();
+        const resetHappened = await checkAndResetStats();
         if (resetHappened) {
-            console.log('🔄 启动时检测到日期变化，今日统计已重置');
+            console.log('🔄 启动时检测到日期变化，统计已更新');
         }
     } catch (error) {
         console.error('❌ 加载统计数据失败:', error);
@@ -411,7 +578,6 @@ const saveStats = async () => {
     try {
         apiStats.lastUpdated = new Date().toISOString();
         
-        const isVercel = process.env.VERCEL || process.env.VERCEL_ENV || process.env.NEXT_PUBLIC_VERCEL_ENV;
         if (isVercel) {
             console.log('📝 Vercel环境：统计数据仅在内存中（重启丢失）');
             return;
@@ -423,7 +589,7 @@ const saveStats = async () => {
             await fileOperations.saveStats();
         }
         
-        if (apiStats.totalCalls % 100 === 0) {
+        if (apiStats.totalCalls % 1000 === 0) {
             await createBackup();
         }
     } catch (error) {
@@ -434,10 +600,12 @@ const saveStats = async () => {
 const updateStats = async () => {
     const today = getBeijingDateString();
     const hour = getBeijingHour();
+    const weekKey = getWeekKey();
+    const monthKey = getMonthKey();
     
-    console.log(`📝 更新统计: 日期=${today}, 小时=${hour}`);
+    console.log(`📝 更新统计: 日期=${today}, 小时=${hour}, 周=${weekKey}, 月=${monthKey}`);
     
-    await checkAndResetDailyStats();
+    await checkAndResetStats();
     
     apiStats.totalCalls++;
     apiStats.dailyCalls[today] = (apiStats.dailyCalls[today] || 0) + 1;
@@ -445,7 +613,8 @@ const updateStats = async () => {
     const hourKey = `${today}-${hour}`;
     apiStats.hourlyCalls[hourKey] = (apiStats.hourlyCalls[hourKey] || 0) + 1;
     
-    cleanupOldData();
+    apiStats.weeklyCalls[weekKey] = (apiStats.weeklyCalls[weekKey] || 0) + 1;
+    apiStats.monthlyCalls[monthKey] = (apiStats.monthlyCalls[monthKey] || 0) + 1;
     
     await saveStats();
     
@@ -454,6 +623,16 @@ const updateStats = async () => {
 
 const getTodayCalls = () => {
     return apiStats.dailyCalls[getBeijingDateString()] || 0;
+};
+
+const getWeekCalls = () => {
+    const weekKey = getWeekKey();
+    return apiStats.weeklyCalls[weekKey] || 0;
+};
+
+const getMonthCalls = () => {
+    const monthKey = getMonthKey();
+    return apiStats.monthlyCalls[monthKey] || 0;
 };
 
 const getNextResetTime = () => {
@@ -488,6 +667,53 @@ const getNextResetTime = () => {
     };
 };
 
+const getNextWeeklyReset = () => {
+    const now = getBeijingDate();
+    const nextMonday = new Date(now);
+    const daysUntilMonday = (8 - now.getDay()) % 7;
+    nextMonday.setDate(now.getDate() + (daysUntilMonday === 0 ? 7 : daysUntilMonday));
+    nextMonday.setHours(0, 0, 0, 0);
+    
+    const timeDiff = nextMonday.getTime() - now.getTime();
+    const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    
+    return {
+        time: nextMonday.toLocaleString('zh-CN', { 
+            timeZone: 'Asia/Shanghai',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            weekday: 'long'
+        }),
+        days,
+        hours,
+        formatted: days > 0 ? `${days}天${hours}小时后` : `${hours}小时后`
+    };
+};
+
+const getNextMonthlyReset = () => {
+    const now = getBeijingDate();
+    const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    nextMonth.setHours(0, 0, 0, 0);
+    
+    const timeDiff = nextMonth.getTime() - now.getTime();
+    const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    
+    return {
+        time: nextMonth.toLocaleString('zh-CN', { 
+            timeZone: 'Asia/Shanghai',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        }),
+        days,
+        hours,
+        formatted: `${days}天${hours}小时后`
+    };
+};
+
 const getBackupCount = async () => {
     try {
         if (!existsSync(BACKUP_DIR)) {
@@ -509,41 +735,85 @@ app.use('*', cors());
 app.use('*', logger());
 
 app.use('/api', async (c, next) => {
+    const startTime = Date.now();
     await next();
+    const endTime = Date.now();
+    const responseTime = endTime - startTime;
+    
     if (c.req.url.includes('/api') && c.res.status === 200) {
         await updateStats();
+        
+        if (!isVercel && useMySQL && dbPool) {
+            const ip = c.req.header('x-real-ip') || c.req.header('x-forwarded-for') || 'unknown';
+            const userAgent = c.req.header('user-agent') || 'unknown';
+            
+            await dbOperations.logApiRequest(
+                c.req.path,
+                c.req.method,
+                c.res.status,
+                responseTime,
+                ip,
+                userAgent
+            );
+        }
     }
 });
 
-app.use('*', async (c, next) => {
-    await checkAndResetDailyStats();
-    await next();
-});
+if (!isVercel) {
+    app.use('*', async (c, next) => {
+        await checkAndResetStats();
+        await next();
+    });
+}
 
 app.get('/api', api);
 app.get('/test', handler);
 
-const isVercel = process.env.VERCEL || process.env.VERCEL_ENV || process.env.NEXT_PUBLIC_VERCEL_ENV;
+app.get('/health', (c) => {
+    return c.json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        mysql: dbPool ? 'connected' : 'disabled',
+        storage: useMySQL ? 'database' : 'local',
+        isVercel: isVercel
+    });
+});
 
 const statsEndpoints = {
     getStats: (c) => {
         const todayCalls = getTodayCalls();
+        const weekCalls = getWeekCalls();
+        const monthCalls = getMonthCalls();
         const nextReset = getNextResetTime();
+        const nextWeeklyReset = getNextWeeklyReset();
+        const nextMonthlyReset = getNextMonthlyReset();
         
         return c.json({
             success: true,
             data: {
                 totalCalls: apiStats.totalCalls,
                 todayCalls,
+                weekCalls,
+                monthCalls,
                 dailyStats: apiStats.dailyCalls,
                 hourlyStats: apiStats.hourlyCalls,
+                weeklyStats: apiStats.weeklyCalls,
+                monthlyStats: apiStats.monthlyCalls,
                 lastUpdated: apiStats.lastUpdated,
                 lastResetDate: apiStats.lastResetDate,
+                lastWeeklyReset: apiStats.lastWeeklyReset,
+                lastMonthlyReset: apiStats.lastMonthlyReset,
                 nextReset: nextReset.time,
                 timeToReset: nextReset.formatted,
+                nextWeeklyReset: nextWeeklyReset.time,
+                timeToWeeklyReset: nextWeeklyReset.formatted,
+                nextMonthlyReset: nextMonthlyReset.time,
+                timeToMonthlyReset: nextMonthlyReset.formatted,
                 storageType: useMySQL ? '数据库' : '本地文件',
-                resetInfo: "总调用次数永不重置，今日调用每天00:00自动重置",
-                resetTime: "00:00",
+                resetInfo: "总调用次数永不重置，今日调用每天00:00重置，每周一重置，每月1号重置",
+                resetTime: "00:00 (北京)",
                 serverTime: new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }),
                 timestamp: new Date().toISOString()
             }
@@ -563,14 +833,45 @@ const statsEndpoints = {
             success: true, 
             message: '今日统计已重置',
             resetDate: today,
-            resetTime: "00:00",
             totalCalls: apiStats.totalCalls,
             todayCalls: 0
         });
     },
 
+    resetWeek: async (c) => {
+        const weekKey = getWeekKey();
+        
+        apiStats.weeklyCalls[weekKey] = 0;
+        apiStats.lastWeeklyReset = weekKey;
+        
+        await saveStats();
+        return c.json({ 
+            success: true, 
+            message: '本周统计已重置',
+            resetWeek: weekKey,
+            weekCalls: 0
+        });
+    },
+
+    resetMonth: async (c) => {
+        const monthKey = getMonthKey();
+        
+        apiStats.monthlyCalls[monthKey] = 0;
+        apiStats.lastMonthlyReset = monthKey;
+        
+        await saveStats();
+        return c.json({ 
+            success: true, 
+            message: '本月统计已重置',
+            resetMonth: monthKey,
+            monthCalls: 0
+        });
+    },
+
     resetAll: async (c) => {
         const today = getBeijingDateString();
+        const weekKey = getWeekKey();
+        const monthKey = getMonthKey();
         
         await createBackup();
         
@@ -578,15 +879,18 @@ const statsEndpoints = {
             totalCalls: 0,
             dailyCalls: {},
             hourlyCalls: {},
+            weeklyCalls: {},
+            monthlyCalls: {},
             lastUpdated: new Date().toISOString(),
-            lastResetDate: today
+            lastResetDate: today,
+            lastWeeklyReset: weekKey,
+            lastMonthlyReset: monthKey
         };
         
         await saveStats();
         return c.json({ 
             success: true, 
             message: '所有统计数据已重置',
-            resetTime: "00:00",
             warning: '总调用次数也被重置了！'
         });
     },
@@ -599,7 +903,8 @@ const statsEndpoints = {
                 mysqlEnabled: useMySQL,
                 mysqlConnected: dbPool !== null,
                 localFileExists: !isVercel && existsSync(STATS_FILE),
-                configAvailable: !!mysql
+                isVercel,
+                environment: isVercel ? 'Vercel' : 'Local'
             }
         });
     },
@@ -701,16 +1006,55 @@ const statsEndpoints = {
                 message: '创建备份失败: ' + error.message
             }, 500);
         }
+    },
+
+    getAnalytics: async (c) => {
+        if (!dbPool) {
+            return c.json({
+                success: false,
+                message: '数据库未连接，无法获取分析数据'
+            }, 400);
+        }
+        
+        try {
+            const analyticsData = await dbOperations.getAnalytics();
+            
+            if (analyticsData) {
+                return c.json({
+                    success: true,
+                    data: {
+                        ...analyticsData,
+                        totalRequests: apiStats.totalCalls,
+                        todayRequests: getTodayCalls(),
+                        weekRequests: getWeekCalls(),
+                        monthRequests: getMonthCalls()
+                    }
+                });
+            } else {
+                return c.json({
+                    success: false,
+                    message: '无法获取分析数据'
+                }, 500);
+            }
+        } catch (error) {
+            return c.json({
+                success: false,
+                message: '获取分析数据失败: ' + error.message
+            }, 500);
+        }
     }
 };
 
 app.get('/stats', statsEndpoints.getStats);
 app.post('/stats/reset-today', statsEndpoints.resetToday);
+app.post('/stats/reset-week', statsEndpoints.resetWeek);
+app.post('/stats/reset-month', statsEndpoints.resetMonth);
 app.post('/stats/reset-all', statsEndpoints.resetAll);
 app.get('/stats/storage-info', statsEndpoints.storageInfo);
 app.post('/stats/migrate-to-db', statsEndpoints.migrateToDB);
 app.get('/stats/backups', statsEndpoints.getBackups);
 app.post('/stats/create-backup', statsEndpoints.createBackup);
+app.get('/stats/analytics', statsEndpoints.getAnalytics);
 
 app.get('/', (c) => {
     const currentTime = new Date().toLocaleString('zh-CN', {
@@ -766,6 +1110,25 @@ app.get('/', (c) => {
     
     const testUrl = getTestUrl();
     
+    const getHealthUrl = () => {
+        const protocol = c.req.header('X-Forwarded-Proto') || 'https';
+        const host = c.req.header('Host') || new URL(c.req.url).host;
+        let base = protocol + '://' + host;
+        const currentPath = new URL(c.req.url).pathname;
+        
+        if (isVercel) {
+            return base + '/health';
+        } else {
+            if (currentPath.startsWith('/meting')) {
+                return base + '/health';
+            } else {
+                return base + '/meting/health';
+            }
+        }
+    };
+    
+    const healthUrl = getHealthUrl();
+    
     const getCorrectBaseUrl = () => {
         const protocol = c.req.header('X-Forwarded-Proto') || 'https';
         const host = c.req.header('Host') || new URL(c.req.url).host;
@@ -777,8 +1140,12 @@ app.get('/', (c) => {
     const today = getBeijingDateString();
     const totalCalls = apiStats.totalCalls;
     const todayCalls = getTodayCalls();
+    const weekCalls = getWeekCalls();
+    const monthCalls = getMonthCalls();
     const lastUpdated = new Date(apiStats.lastUpdated).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
     const nextReset = getNextResetTime();
+    const nextWeeklyReset = getNextWeeklyReset();
+    const nextMonthlyReset = getNextMonthlyReset();
     
     const storageType = useMySQL ? '数据库' : '本地文件';
     const storageIcon = useMySQL ? '💾' : '📁';
@@ -824,12 +1191,16 @@ app.get('/', (c) => {
             --accent-hover: #3a9fe8;
             --success-color: #2ecc71;
             --warning-color: #FFE92C;
+            --stat-week: #FF9C00;
+            --stat-month: #10FBDF;
             --btn-primary: linear-gradient(45deg, #50B7FE, #3a9fe8);
             --btn-success: linear-gradient(45deg, #2ecc71, #27ae60);
             --btn-purple: linear-gradient(45deg, #9b59b6, #8e44ad);
             --btn-orange: linear-gradient(45deg, #ff7e5f, #feb47b);
             --stat-total: #50B7FE;
             --stat-today: #FFE92C;
+            /* 新增版本药丸渐变颜色变量 */
+            --version-gradient: linear-gradient(90deg, #50B7FE, #FFE92C);
         }
         
         [data-theme="light"] {
@@ -848,12 +1219,16 @@ app.get('/', (c) => {
             --accent-hover: #3a9fe8;
             --success-color: #2ecc71;
             --warning-color: #FFE92C;
+            --stat-week: #FF9C00;
+            --stat-month: #10FBDF;
             --btn-primary: linear-gradient(45deg, #50B7FE, #3a9fe8);
             --btn-success: linear-gradient(45deg, #2ecc71, #27ae60);
             --btn-purple: linear-gradient(45deg, #9b59b6, #5a32a3);
             --btn-orange: linear-gradient(45deg, #ff7e5f, #e8590c);
             --stat-total: #50B7FE;
             --stat-today: #FFE92C;
+            /* 浅色主题下的版本药丸渐变颜色 */
+            --version-gradient: linear-gradient(90deg, #50B7FE, #FFE92C);
         }
         
         body {
@@ -966,7 +1341,7 @@ app.get('/', (c) => {
         
         .version-badge {
             display: inline-block;
-            background: #50B7FE;
+            background: var(--version-gradient);
             color: white;
             padding: 0.5rem 1rem;
             border-radius: 50px;
@@ -974,6 +1349,18 @@ app.get('/', (c) => {
             font-weight: bold;
             margin-bottom: 1rem;
             box-shadow: 0 4px 15px var(--shadow-color);
+            animation: versionPulse 3s infinite alternate;
+        }
+        
+        @keyframes versionPulse {
+            0% {
+                background: linear-gradient(90deg, #50B7FE, #FFE92C);
+                box-shadow: 0 4px 15px rgba(80, 183, 254, 0.5);
+            }
+            100% {
+                background: linear-gradient(90deg, #3AA7FE, #FFD700);
+                box-shadow: 0 6px 20px rgba(80, 183, 254, 0.7), 0 0 30px rgba(255, 233, 44, 0.3);
+            }
         }
         
         .info-grid {
@@ -1168,26 +1555,29 @@ app.get('/', (c) => {
         }
         
         .stats-container {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
             margin-top: 10px;
         }
         
         .stat-item {
             text-align: center;
-            flex: 1;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
         }
         
         .stat-number {
-            font-size: 1.5rem;
+            font-size: 1.3rem;
             font-weight: bold;
             margin-bottom: 5px;
             text-shadow: 0 2px 8px var(--shadow-color);
         }
         
         .stat-label {
-            font-size: 0.85rem;
+            font-size: 0.8rem;
             color: var(--text-secondary);
             text-shadow: 0 1px 3px var(--shadow-color);
         }
@@ -1200,11 +1590,25 @@ app.get('/', (c) => {
             color: var(--stat-today);
         }
         
-        .stat-divider {
-            width: 1px;
-            height: 40px;
-            background: var(--border-color);
-            margin: 0 20px;
+        .stat-week {
+            color: var(--stat-week);
+        }
+        
+        .stat-month {
+            color: var(--stat-month);
+        }
+        
+        .vercel-notice {
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(255, 193, 7, 0.1);
+            border-radius: 8px;
+            border-left: 3px solid var(--warning-color);
+            font-size: 0.9rem;
+        }
+        
+        .vercel-notice strong {
+            color: var(--warning-color);
         }
         
         @keyframes float {
@@ -1249,15 +1653,14 @@ app.get('/', (c) => {
             }
             
             .stats-container {
-                flex-direction: column;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 10px;
             }
-            
-            .stat-item {
-                margin-bottom: 15px;
-            }
-            
-            .stat-divider {
-                display: none;
+        }
+        
+        @media (max-width: 480px) {
+            .stats-container {
+                grid-template-columns: 1fr;
             }
         }
     </style>
@@ -1277,8 +1680,12 @@ app.get('/', (c) => {
                      style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover; border: 4px solid var(--border-color); box-shadow: 0 8px 25px var(--shadow-color); background: var(--card-bg); padding: 3px; animation: float 3s ease-in-out infinite;">
             </div>
             <h1>初叶🍂Meting API</h1>
-            <p class="tagline">初叶🍂Meting API-1.4.3</p>
-            <div class="version-badge">版本 v1.4.3</div>
+            <p class="tagline">初叶🍂Meting API-1.5.0 祝各位2026年新年快乐！！！</p>
+            <div class="version-badge">版本 v1.5.0</div>
+            ${isVercel ? `
+            <div class="vercel-notice">
+                <strong>🌐 Vercel环境说明：</strong> 当前运行在Vercel无状态环境中，统计数据无法保存。如需API调用统计，请部署到本地或自有服务器。
+            </div>` : ''}
         </header>
         
         <div class="info-grid">
@@ -1291,11 +1698,15 @@ app.get('/', (c) => {
                         <span class="status-badge ${runtime.includes('Node') ? 'status-online' : 'status-local'}">
                             ${runtime.includes('Node') ? '生产环境' : '开发环境'}
                         </span>
+                        ${isVercel ? '<span class="status-badge status-warning" style="background: linear-gradient(45deg, #000000, #484848); color: white;">Vercel</span>' : ''}
                     </div>
                 </div>
                 <div class="info-item">
                     <div class="label">存储方式</div>
-                    <div class="value">${storageIcon} ${storageType}</div>
+                    <div class="value">
+                        ${storageIcon} ${storageType}
+                        ${isVercel ? '<span style="color: var(--warning-color); margin-left: 10px;">(无法统计)</span>' : ''}
+                    </div>
                 </div>
                 <div class="info-item">
                     <div class="label">服务端口</div>
@@ -1311,12 +1722,12 @@ app.get('/', (c) => {
                     </div>
                 </div>
                 <div class="info-item">
-                    <div class="label">API地址</div>
+                    <div class="label">健康检查</div>
                     <div class="value">
-                        <a href="${apiUrl}">${apiUrl}</a>
-                        ${isVercel ? '<br><small style="color: var(--success-color);">(Vercel环境 - 已自动优化路径)</small>' : ''}
+                        <a href="${healthUrl}" style="color: var(--accent-color);">${healthUrl}</a>
                     </div>
                 </div>
+                ${!isVercel ? `
                 <div class="info-item">
                     <div class="label">API 调用统计</div>
                     <div class="value">
@@ -1325,14 +1736,21 @@ app.get('/', (c) => {
                                 <div class="stat-number stat-total">${totalCalls.toLocaleString()}</div>
                                 <div class="stat-label">总调用次数</div>
                             </div>
-                            <div class="stat-divider"></div>
                             <div class="stat-item">
                                 <div class="stat-number stat-today">${todayCalls.toLocaleString()}</div>
                                 <div class="stat-label">今日调用</div>
                             </div>
+                            <div class="stat-item">
+                                <div class="stat-number stat-week">${weekCalls.toLocaleString()}</div>
+                                <div class="stat-label">本周调用</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-number stat-month">${monthCalls.toLocaleString()}</div>
+                                <div class="stat-label">本月调用</div>
+                            </div>
                         </div>
                     </div>
-                </div>
+                </div>` : ''}
             </div>
             
             <div class="info-card">
@@ -1348,14 +1766,19 @@ app.get('/', (c) => {
                         ${isVercel ? '<span class="status-badge" style="background: linear-gradient(45deg, #000000, #484848); color: white; margin-left: 5px;">Vercel</span>' : ''}
                     </div>
                 </div>
+                ${!isVercel ? `
                 <div class="info-item">
                     <div class="label">统计更新</div>
                     <div class="value">${lastUpdated}</div>
                 </div>
                 <div class="info-item">
                     <div class="label">下次重置</div>
-                    <div class="value">${nextReset.time}</div>
-                </div>
+                    <div class="value">
+                        今日：${nextReset.time}<br>
+                        本周：${nextWeeklyReset.time}<br>
+                        本月：${nextMonthlyReset.time}
+                    </div>
+                </div>` : ''}
                 <div class="info-item">
                     <div class="label">访问地址</div>
                     <div class="value">
@@ -1400,7 +1823,7 @@ app.get('/', (c) => {
         
         <footer>
             <p>© 2024-2025 初叶🍂Meting API| 提供稳定可靠的API支持</p>
-            <p>API调用统计：总 ${totalCalls.toLocaleString()} 次 | 今日 ${todayCalls.toLocaleString()} 次 | 下次重置：${nextReset.time}</p>
+            ${!isVercel ? `<p>API调用统计：总 <span style="color: var(--accent-color); font-weight: bold;">${totalCalls.toLocaleString()}</span> 次 | 今日 <span style="color: var(--stat-today); font-weight: bold;">${todayCalls.toLocaleString()}</span> 次 | 本周 <span style="color: var(--stat-week); font-weight: bold;">${weekCalls.toLocaleString()}</span> 次 | 本月 <span style="color: var(--stat-month); font-weight: bold;">${monthCalls.toLocaleString()}</span> 次</p>` : ''}
             <p>最后更新：${lastUpdated} | 如有问题，请查看文档或联系技术支持</p>
             <p style="margin-top: 10px; font-size: 0.8rem; color: var(--text-muted);">
                 <span>主题：<span id="currentTheme">深色模式</span> | </span>
@@ -1547,13 +1970,31 @@ app.get('/', (c) => {
 });
 
 const cleanup = async () => {
+    console.log('\n🔄 正在关闭服务器，清理资源...');
+    
     if (dbPool) {
-        await dbPool.end();
-        console.log('🔒 数据库连接已关闭');
+        try {
+            await dbPool.end();
+            console.log('✅ 数据库连接池已关闭');
+        } catch (error) {
+            console.error('❌ 关闭数据库连接池失败:', error);
+        }
     }
+    
+    console.log('👋 服务器已优雅关闭');
 };
 
 process.on('SIGINT', cleanup);
 process.on('SIGTERM', cleanup);
+process.on('SIGUSR2', cleanup);
+
+process.on('uncaughtException', (error) => {
+    console.error('❌ 未捕获的异常:', error);
+    cleanup();
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ 未处理的 Promise 拒绝:', reason);
+});
 
 export default app
